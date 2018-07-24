@@ -10,6 +10,7 @@
 #include "veditconfig.h"
 #include "vconstants.h"
 #include "vfile.h"
+#include "vwordcountinfo.h"
 
 class QWidget;
 class VEditorObject;
@@ -142,10 +143,16 @@ public:
 
     void setVimMode(VimMode p_mode);
 
+    VVim *getVim() const;
+
     virtual QString getContent() const = 0;
 
     // @p_modified: if true, delete the whole content and insert the new content.
     virtual void setContent(const QString &p_content, bool p_modified = false) = 0;
+
+    virtual VWordCountInfo fetchWordCountInfo() const = 0;
+
+    virtual bool setCursorPosition(int p_blockNumber, int p_posInBlock);
 
 // Wrapper functions for QPlainTextEdit/QTextEdit.
 // Ends with W to distinguish it from the original interfaces.
@@ -153,6 +160,8 @@ public:
     virtual void setExtraSelectionsW(const QList<QTextEdit::ExtraSelection> &p_selections) = 0;
 
     virtual QTextDocument *documentW() const = 0;
+
+    virtual int tabStopWidthW() const = 0;
 
     virtual void setTabStopWidthW(int p_width) = 0;
 
@@ -360,6 +369,8 @@ signals:
     void mousePressed(QMouseEvent *p_event);
 
     void mouseReleased(QMouseEvent *p_event);
+
+    void cursorPositionChanged();
 
 private slots:
     // Timer for find-wrap label.

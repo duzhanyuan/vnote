@@ -41,7 +41,7 @@ void VFindReplaceDialog::setupUI()
     // Replace
     QLabel *replaceLabel = new QLabel(tr("&Replace with:"));
     m_replaceEdit = new VLineEdit();
-    m_replaceEdit->setPlaceholderText(tr("Enter text to replace with"));
+    m_replaceEdit->setPlaceholderText(tr("\\1, \\2 for back reference in regular expression"));
     replaceLabel->setBuddy(m_replaceEdit);
     m_replaceBtn = new QPushButton(tr("Replace"));
     m_replaceBtn->setProperty("FlatBtn", true);
@@ -49,7 +49,7 @@ void VFindReplaceDialog::setupUI()
     m_replaceFindBtn->setProperty("FlatBtn", true);
     m_replaceAllBtn = new QPushButton(tr("Replace A&ll"));
     m_replaceAllBtn->setProperty("FlatBtn", true);
-    m_advancedBtn = new QPushButton(tr("&Advanced >>"));
+    m_advancedBtn = new QPushButton(tr("&Advanced >>>"));
     m_advancedBtn->setProperty("FlatBtn", true);
     m_advancedBtn->setCheckable(true);
 
@@ -199,9 +199,9 @@ void VFindReplaceDialog::handleFindTextChanged(const QString &p_text)
 void VFindReplaceDialog::advancedBtnToggled(bool p_checked)
 {
     if (p_checked) {
-        m_advancedBtn->setText("B&asic <<");
+        m_advancedBtn->setText(tr("B&asic <<<"));
     } else {
-        m_advancedBtn->setText("&Advanced <<");
+        m_advancedBtn->setText(tr("&Advanced >>>"));
     }
 
     m_caseSensitiveCheck->setVisible(p_checked);

@@ -73,7 +73,15 @@ Notice that the sequence number is irrelevant. Markdown will change the sequence
 
 ### Images and Links
 ```md
-![Image Alt Text](/url/to/images.png)
+![Image Alt Text](/url/to/image.png "Optional Text")
+
+![Image Alt Text](/url/to/image.png "Image specified with width and height" =800x600)
+
+![Image Alt Text](/url/to/image.png =800x600)
+
+![Image Alt Text](/url/to/image.png "Image specified with width" =800x)
+
+![Image Alt Text](/url/to/image.png "Image specified with height" =x600)
 
 [Link Text](/url/of/the/link)
 ```
@@ -81,6 +89,7 @@ Notice that the sequence number is irrelevant. Markdown will change the sequence
 **Notes**:
 
 - It is not recommended to use image links in reference format. VNote will not preview those images.
+- Specifying size of image is supported only in **markdown-it**.
 
 ### Blockquotes
 ```md
@@ -107,10 +116,69 @@ As VNote suggests:
 
 - `lang` is optional to specify the language of the code;
 
+### Diagrams
+
+> You need to enable Flowchart.js or Mermaid in the `Markdown` menu.
+
+VNote supports [Flowchart.js](http://flowchart.js.org/) and [Mermaid](https://mermaidjs.github.io/) to draw diagrams such as *flowchart* and *sequence diagram*. You should use `flow` or `flowchart` and `mermaid` specified as the language of the fenced code block and write the definition of your diagram within it.
+
+    ```flowchart
+    st=>start: Start:>http://www.google.com[blank]
+    e=>end:>http://www.google.com
+    op1=>operation: My Operation
+    sub1=>subroutine: My Subroutine
+    cond=>condition: Yes
+    or No?:>http://www.google.com
+    io=>inputoutput: catch something...
+
+    st->op1->cond
+    cond(yes)->io->e
+    cond(no)->sub1(right)->op1
+    ```
+
+#### UML
+
+> You need to enable PlantUML in the settings. Pay attention to the privacy issue if you use online PlantUML server. You may need to prepare Java runtime, PlantUML, and Graphviz if you choose local PlantUML.
+
+VNote supports [PlantUML](http://plantuml.com/) to draw UML diagrams. You should use `puml` specified as the language of the fenced code block and write the definition of your diagram within it.
+
+    ```puml
+    @startuml
+    Bob -> Alice : hello
+    @enduml
+    ```
+
+#### Graphviz
+
+> You need to enable Graphviz in the settings.
+
+VNote supports [Graphviz](http://www.graphviz.org/) to draw diagrams. You should use `dot` specified as the language of the fenced code block and write the definition of your diagram within it.
+
+### Math Formulas
+
+> You need to enable MathJax in the `Markdown` menu and restart VNote.
+
+VNote supports math formulas via [MathJax](https://www.mathjax.org/). The default math delimiters are `$$...$$` for **displayed mathematics**, and `$...$` for **inline mathematics**.
+
+- Inline mathematics should not cross multiple lines;
+- Forms like `3$abc$`, `$abc$4`, `$ abc$`, and `$abc $` will not be treated as mathematics;
+- Use `\` to escape `$`;
+- There should be only space chars before opening `$$` and after closing `$$`;
+
+VNote also supports displayed mathematics via fenced code block with language `mathjax` specified.
+
+    ```mathjax
+    $$
+    J(\theta) = \frac 1 2 \sum_{i=1}^m (h_\theta(x^{(i)})-y^{(i)})^2
+    $$
+    ```
+
 ### Inline Code
 ```md
 Here is a `inline code`.
 ```
+
+To insert one `` ` ``, you need to use two `` ` `` to enclose it, such as ``` `` ` `` ```. To insert two `` ` ``, you need to use three `` ` ``.
 
 ### Strikethrough
 ```md
@@ -132,6 +200,16 @@ Here is a ~~text~~ with strikethrough.
 This is a footnote [^1].
 
 [^1]: Here is the detail of the footnote.
+```
+
+### Superscript and Subscript
+
+> You need to enable Superscript or Subscript in the `Markdown` menu and use `Markdown-it` renderer.
+
+```md
+This is the 1^st^ superscript.
+
+This is the H~2~O subscript.
 ```
 
 ### New Line and Paragraph

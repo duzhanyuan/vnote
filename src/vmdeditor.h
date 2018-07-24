@@ -14,11 +14,12 @@
 #include "vconfigmanager.h"
 #include "utils/vutils.h"
 
-class HGMarkdownHighlighter;
+class PegMarkdownHighlighter;
 class VCodeBlockHighlightHelper;
 class VDocument;
 class VPreviewManager;
 class VCopyTextAsHtmlDialog;
+class VEditTab;
 
 class VMdEditor : public VTextEdit, public VEditor
 {
@@ -67,10 +68,20 @@ public:
     // Update m_initImages and m_insertedImages to handle the change of the note path.
     void updateInitAndInsertedImages(bool p_fileChanged, UpdateAction p_act);
 
+    VWordCountInfo fetchWordCountInfo() const Q_DECL_OVERRIDE;
+
+    void setEditTab(VEditTab *p_editTab);
+
+    PegMarkdownHighlighter *getMarkdownHighlighter() const;
+
+    VPreviewManager *getPreviewManager() const;
+
+    void updateHeaderSequenceByConfigChange();
+
 public slots:
     bool jumpTitle(bool p_forward, int p_relativeLevel, int p_repeat) Q_DECL_OVERRIDE;
 
-    void textToHtmlFinished(const QString &p_text, const QUrl &p_baseUrl, const QString &p_html);
+    void textToHtmlFinished(int p_id, int p_timeStamp, const QUrl &p_baseUrl, const QString &p_html);
 
 // Wrapper functions for QPlainTextEdit/QTextEdit.
 public:
@@ -82,6 +93,11 @@ public:
     QTextDocument *documentW() const Q_DECL_OVERRIDE
     {
         return document();
+    }
+
+    int tabStopWidthW() const Q_DECL_OVERRIDE
+    {
+        return tabStopWidth();
     }
 
     void setTabStopWidthW(int p_width) Q_DECL_OVERRIDE
@@ -180,7 +196,7 @@ signals:
     void statusChanged();
 
     // Request to convert @p_text to Html.
-    void requestTextToHtml(const QString &p_text);
+    void requestTextToHtml(const QString &p_text, int p_id, int p_timeStamp);
 
 protected:
     void updateFontAndPalette() Q_DECL_OVERRIDE;
@@ -211,9 +227,11 @@ private slots:
     void updateCurrentHeader();
 
     // Copy selected text as HTML.
-    void handleCopyAsHtmlAction();
+    void handleCopyAsAction(QAction *p_act);
 
 private:
+    void updateHeadersHelper(const QVector<VElementRegion> &p_headerRegions, bool p_configChanged);
+
     // Update the config of VTextEdit according to global configurations.
     void updateTextEditConfig();
 
@@ -232,7 +250,13 @@ private:
     // We need to maintain the styles font size.
     void zoomPage(bool p_zoomIn, int p_range = 1);
 
-    HGMarkdownHighlighter *m_mdHighlighter;
+    void initCopyAsMenu(QAction *p_before, QMenu *p_menu);
+
+    void initPasteAsBlockQuoteMenu(QMenu *p_menu);
+
+    void insertImageLink(const QString &p_text, const QString &p_url);
+
+    PegMarkdownHighlighter *m_pegHighlighter;
 
     VCodeBlockHighlightHelper *m_cbHighlighter;
 
@@ -252,5 +276,19 @@ private:
     VCopyTextAsHtmlDialog *m_textToHtmlDialog;
 
     int m_zoomDelta;
+
+    VEditTab *m_editTab;
+
+    int m_copyTimeStamp;
 };
+
+inline PegMarkdownHighlighter *VMdEditor::getMarkdownHighlighter() const
+{
+    return m_pegHighlighter;
+}
+
+inline VPreviewManager *VMdEditor::getPreviewManager() const
+{
+    return m_previewMgr;
+}
 #endif // VMDEDITOR_H

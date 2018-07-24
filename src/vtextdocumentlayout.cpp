@@ -8,7 +8,6 @@
 #include <QFontMetrics>
 #include <QFont>
 #include <QPainter>
-#include <QDebug>
 
 #include "vimageresourcemanager2.h"
 #include "vtextedit.h"
@@ -74,10 +73,15 @@ void VTextDocumentLayout::blockRangeFromRect(const QRectF &p_rect,
         return;
     }
 
+    if (document()->blockCount() != m_blocks.size()) {
+        p_first = -1;
+        p_last = -1;
+        return;
+    }
+
     p_first = -1;
     p_last = m_blocks.size() - 1;
     int y = p_rect.y();
-    Q_ASSERT(document()->blockCount() == m_blocks.size());
     QTextBlock block = document()->firstBlock();
     while (block.isValid()) {
         const BlockInfo &info = m_blocks[block.blockNumber()];
@@ -121,9 +125,11 @@ void VTextDocumentLayout::blockRangeFromRectBS(const QRectF &p_rect,
         return;
     }
 
-    Q_ASSERT(document()->blockCount() == m_blocks.size());
-
-    p_first = findBlockByPosition(p_rect.topLeft());
+    if (document()->blockCount() != m_blocks.size()) {
+        p_first = -1;
+    } else {
+        p_first = findBlockByPosition(p_rect.topLeft());
+    }
 
     if (p_first == -1) {
         p_last = -1;
@@ -227,6 +233,18 @@ void VTextDocumentLayout::draw(QPainter *p_painter, const PaintContext &p_contex
             fillBackground(p_painter,
                            rect.adjusted(x, y, x, y),
                            bg);
+        }
+
+        // Draw block background for HRULE.
+        if (block.userState() == HighlightBlockState::HRule) {
+            QVector<QTextLayout::FormatRange> fmts = layout->formats();
+            if (fmts.size() == 1) {
+                int x = offset.x();
+                int y = offset.y();
+                fillBackground(p_painter,
+                               rect.adjusted(x, y, x, y),
+                               fmts[0].format.background());
+            }
         }
 
         auto selections = formatRangeFromSelection(block, p_context.selections);
@@ -674,6 +692,10 @@ void VTextDocumentLayout::layoutInlineImage(const VPreviewedImageInfo *p_info,
         ipi.m_rect = QRectF(QPointF(p_xStart,
                                     p_heightInBlock + p_imageSpaceHeight - size.height()),
                             size);
+        if (!p_info->m_background.isEmpty()) {
+            ipi.m_background = QColor(p_info->m_background);
+        }
+
         p_images.append(ipi);
     }
 }
@@ -771,16 +793,6 @@ void VTextDocumentLayout::updateDocumentSize()
     }
 }
 
-void VTextDocumentLayout::setCursorWidth(int p_width)
-{
-    m_cursorWidth = p_width;
-}
-
-int VTextDocumentLayout::cursorWidth() const
-{
-    return m_cursorWidth;
-}
-
 QRectF VTextDocumentLayout::blockRectFromTextLayout(const QTextBlock &p_block,
                                                     ImagePaintInfo *p_image)
 {
@@ -820,6 +832,9 @@ QRectF VTextDocumentLayout::blockRectFromTextLayout(const QTextBlock &p_block,
                                                  br.height() + m_lineLeading,
                                                  size.width(),
                                                  size.height());
+                        if (!img.m_background.isEmpty()) {
+                            p_image->m_background = QColor(img.m_background);
+                        }
                     }
 
                     int dw = padding + size.width() + m_margin - br.width();
@@ -932,6 +947,12 @@ void VTextDocumentLayout::drawImages(QPainter *p_painter,
                                                p_offset.x(),
                                                p_offset.y()).toRect();
 
+        // Qt do not render the background of some SVGs.
+        // We add a forced background mechanism to complement this.
+        if (img.hasForcedBackground()) {
+            p_painter->fillRect(targetRect, img.m_background);
+        }
+
         p_painter->drawPixmap(targetRect, *image);
     }
 }
@@ -985,7 +1006,7 @@ void VTextDocumentLayout::relayout()
     emit update(QRectF(0., 0., 1000000000., 1000000000.));
 }
 
-void VTextDocumentLayout::relayout(const QSet<int> &p_blocks)
+void VTextDocumentLayout::relayout(const OrderedIntSet &p_blocks)
 {
     if (p_blocks.isEmpty()) {
         return;
@@ -993,8 +1014,9 @@ void VTextDocumentLayout::relayout(const QSet<int> &p_blocks)
 
     QTextDocument *doc = document();
 
-    for (auto bn : p_blocks) {
-        QTextBlock block = doc->findBlockByNumber(bn);
+    // Need to relayout and update blocks in ascending order.
+    for (auto bn = p_blocks.keyBegin(); bn != p_blocks.keyEnd(); ++bn) {
+        QTextBlock block = doc->findBlockByNumber(*bn);
         if (block.isValid()) {
             clearBlockLayout(block);
             layoutBlock(block);

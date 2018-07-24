@@ -1,3 +1,13 @@
+var channelInitialized = false;
+
+var contentDiv = document.getElementById('content-div');
+
+var previewDiv = document.getElementById('preview-div');
+
+var inplacePreviewDiv = document.getElementById('inplace-preview-div');
+
+var textHtmlDiv = document.getElementById('text-html-div');
+
 var content;
 
 // Current header index in all headers.
@@ -8,6 +18,9 @@ var pendingKeys = [];
 
 var VMermaidDivClass = 'mermaid-diagram';
 var VFlowchartDivClass = 'flowchart-diagram';
+var VPlantUMLDivClass = 'plantuml-diagram';
+var VMetaDataCodeClass = 'markdown-metadata';
+
 if (typeof VEnableMermaid == 'undefined') {
     VEnableMermaid = false;
 } else if (VEnableMermaid) {
@@ -32,6 +45,29 @@ if (typeof VStylesToInline == 'undefined') {
     VStylesToInline = '';
 }
 
+// 0 - disable PlantUML;
+// 1 - Use online PlantUML processor;
+// 2 - Use local PlantUML processor;
+if (typeof VPlantUMLMode == 'undefined') {
+    VPlantUMLMode = 0;
+}
+
+if (typeof VPlantUMLServer == 'undefined') {
+    VPlantUMLServer = 'http://www.plantuml.com/plantuml';
+}
+
+if (typeof VPlantUMLFormat == 'undefined') {
+    VPlantUMLFormat = 'svg';
+}
+
+if (typeof VEnableGraphviz == 'undefined') {
+    VEnableGraphviz = false;
+}
+
+if (typeof VGraphvizFormat == 'undefined') {
+    VGraphvizFormat = 'svg';
+}
+
 // Add a caption (using alt text) under the image.
 var VImageCenterClass = 'img-center';
 var VImageCaptionClass = 'img-caption';
@@ -40,18 +76,95 @@ if (typeof VEnableImageCaption == 'undefined') {
     VEnableImageCaption = false;
 }
 
+if (typeof VEnableFlashAnchor == 'undefined') {
+    VEnableFlashAnchor = false;
+}
+
+if (typeof VRemoveMathjaxScript == 'undefined') {
+    VRemoveMathjaxScript = false;
+}
+
+if (typeof VAddTOC == 'undefined') {
+    VAddTOC = false;
+}
+
+if (typeof VOS == 'undefined') {
+    VOS = 'win';
+}
+
+if (typeof handleMathjaxReady == 'undefined') {
+    var handleMathjaxReady = function() {};
+}
+
+// Whether highlight special blocks like puml, flowchart.
+var highlightSpecialBlocks = false;
+
+var getUrlScheme = function(url) {
+    var idx = url.indexOf(':');
+    if (idx > -1) {
+        return url.substr(0, idx);
+    } else {
+        return null;
+    }
+};
+
+var replaceCssUrl = function(baseUrl, match, p1, offset, str) {
+    if (getUrlScheme(p1)) {
+        return match;
+    }
+
+    var url = baseUrl + '/' + p1;
+    return "url(\"" + url + "\");";
+};
+
+var translateCssUrlToAbsolute = function(baseUrl, css) {
+    return css.replace(/\burl\(\"([^\"\)]+)\"\);/g, replaceCssUrl.bind(undefined, baseUrl));
+};
+
+var styleContent = function() {
+    var styles = "";
+    for (var i = 0; i < document.styleSheets.length; ++i) {
+        var styleSheet = document.styleSheets[i];
+        if (styleSheet.cssRules) {
+            var baseUrl = null;
+            if (styleSheet.href) {
+                var scheme = getUrlScheme(styleSheet.href);
+                // We only translate local resources.
+                if (scheme == 'file' || scheme == 'qrc') {
+                    baseUrl = styleSheet.href.substr(0, styleSheet.href.lastIndexOf('/'));
+                }
+            }
+
+            for (var j = 0; j < styleSheet.cssRules.length; ++j) {
+                var css = styleSheet.cssRules[j].cssText;
+                if (baseUrl) {
+                    // Try to replace the url() with absolute path.
+                    css = translateCssUrlToAbsolute(baseUrl, css);
+                }
+
+                styles = styles + css + "\n";
+            }
+        }
+    }
+
+    return styles;
+};
+
+var htmlContent = function() {
+    content.htmlContentCB("", styleContent(), contentDiv.innerHTML);
+};
+
+var mute = function(muted) {
+    g_muteScroll = muted;
+};
+
 new QWebChannel(qt.webChannelTransport,
     function(channel) {
         content = channel.objects.content;
-        if (typeof updateHtml == "function") {
-            updateHtml(content.html);
-            content.htmlChanged.connect(updateHtml);
-        }
-        if (typeof updateText == "function") {
-            content.textChanged.connect(updateText);
-            content.updateText();
-        }
+
         content.requestScrollToAnchor.connect(scrollToAnchor);
+
+        content.requestMuted.connect(mute);
 
         if (typeof highlightText == "function") {
             content.requestHighlightText.connect(highlightText);
@@ -62,6 +175,30 @@ new QWebChannel(qt.webChannelTransport,
             content.requestTextToHtml.connect(textToHtml);
             content.noticeReadyToTextToHtml();
         }
+
+        if (typeof htmlContent == "function") {
+            content.requestHtmlContent.connect(htmlContent);
+        }
+
+        content.plantUMLResultReady.connect(handlePlantUMLResult);
+        content.graphvizResultReady.connect(handleGraphvizResult);
+
+        content.requestPreviewEnabled.connect(setPreviewEnabled);
+
+        content.requestPreviewCodeBlock.connect(previewCodeBlock);
+        content.requestSetPreviewContent.connect(setPreviewContent);
+
+        if (typeof updateHtml == "function") {
+            updateHtml(content.html);
+            content.htmlChanged.connect(updateHtml);
+        }
+
+        if (typeof updateText == "function") {
+            content.textChanged.connect(updateText);
+            content.updateText();
+        }
+
+        channelInitialized = true;
     });
 
 var VHighlightedAnchorClass = 'highlighted-anchor';
@@ -73,7 +210,11 @@ var clearHighlightedAnchor = function() {
     }
 };
 
-var highlightAnchor = function(anchor) {
+var flashAnchor = function(anchor) {
+    if (!VEnableFlashAnchor) {
+        return;
+    }
+
     clearHighlightedAnchor();
     anchor.classList.add(VHighlightedAnchorClass);
 };
@@ -92,7 +233,7 @@ var scrollToAnchor = function(anchor) {
     var anc = document.getElementById(anchor);
     if (anc != null) {
         anc.scrollIntoView();
-        highlightAnchor(anc);
+        flashAnchor(anc);
 
         var headers = document.querySelectorAll("h1, h2, h3, h4, h5, h6");
         for (var i = 0; i < headers.length; ++i) {
@@ -160,6 +301,7 @@ document.onkeydown = function(e) {
     var key;
     var shift;
     var ctrl;
+    var meta;
     if (e.which) {
         key = e.which;
     } else {
@@ -168,12 +310,15 @@ document.onkeydown = function(e) {
 
     shift = !!e.shiftKey;
     ctrl = !!e.ctrlKey;
+    meta = !!e.metaKey;
+    var isCtrl = VOS == 'mac' ? e.metaKey : e.ctrlKey;
     switch (key) {
     // Skip Ctrl, Shift, Alt, Supper.
     case 16:
     case 17:
     case 18:
     case 91:
+    case 92:
         clear = false;
         break;
 
@@ -199,7 +344,7 @@ document.onkeydown = function(e) {
     case 104:
     case 105:
     {
-        if (pendingKeys.length != 0 || ctrl || shift) {
+        if (pendingKeys.length != 0 || ctrl || shift || meta) {
             accept = false;
             break;
         }
@@ -211,7 +356,7 @@ document.onkeydown = function(e) {
     }
 
     case 74: // J
-        if (!ctrl && !shift) {
+        if (!shift && (!ctrl || isCtrl) && (!meta || isCtrl)) {
             window.scrollBy(0, 100);
             break;
         }
@@ -220,7 +365,7 @@ document.onkeydown = function(e) {
         break;
 
     case 75: // K
-        if (!ctrl && !shift) {
+        if (!shift && (!ctrl || isCtrl) && (!meta || isCtrl)) {
             window.scrollBy(0, -100);
             break;
         }
@@ -229,7 +374,7 @@ document.onkeydown = function(e) {
         break;
 
     case 72: // H
-        if (!ctrl && !shift) {
+        if (!ctrl && !shift && !meta) {
             window.scrollBy(-100, 0);
             break;
         }
@@ -238,7 +383,7 @@ document.onkeydown = function(e) {
         break;
 
     case 76: // L
-        if (!ctrl && !shift) {
+        if (!ctrl && !shift && !meta) {
             window.scrollBy(100, 0);
             break;
         }
@@ -254,7 +399,7 @@ document.onkeydown = function(e) {
                 window.scrollTo(scrollLeft, scrollHeight);
                 break;
             }
-        } else if (!ctrl) {
+        } else if (!ctrl && !meta) {
             if (pendingKeys.length == 0) {
                 // First g, pend it.
                 pendingKeys.push({
@@ -313,7 +458,7 @@ document.onkeydown = function(e) {
                     break;
                 }
             }
-        } else if (!ctrl) {
+        } else if (!ctrl && !meta) {
             // [
             if (pendingKeys.length == 0) {
                 // First [, pend it.
@@ -356,7 +501,7 @@ document.onkeydown = function(e) {
                     break;
                 }
             }
-        } else if (!ctrl) {
+        } else if (!ctrl && !meta) {
             // ]
             if (pendingKeys.length == 0) {
                 // First ], pend it.
@@ -399,7 +544,7 @@ document.onkeydown = function(e) {
     if (accept) {
         e.preventDefault();
     } else {
-        content.keyPressEvent(key, ctrl, shift);
+        content.keyPressEvent(key, ctrl, shift, meta);
     }
 };
 
@@ -447,7 +592,7 @@ var renderMermaidOne = function(code) {
     mermaidIdx++;
     try {
         // Do not increment mermaidIdx here.
-        var graph = mermaidAPI.render('mermaid-diagram-' + mermaidIdx, code.innerText, function(){});
+        var graph = mermaidAPI.render('mermaid-diagram-' + mermaidIdx, code.textContent, function(){});
     } catch (err) {
         content.setLog("err: " + err);
         return false;
@@ -460,16 +605,16 @@ var renderMermaidOne = function(code) {
     var graphDiv = document.createElement('div');
     graphDiv.classList.add(VMermaidDivClass);
     graphDiv.innerHTML = graph;
+
     var preNode = code.parentNode;
-    preNode.classList.add(VMermaidDivClass);
-    preNode.replaceChild(graphDiv, code);
+    preNode.parentNode.replaceChild(graphDiv, preNode);
     return true;
 };
 
 var flowchartIdx = 0;
 
 // @className, the class name of the flowchart code block, such as 'lang-flowchart'.
-var renderFlowchart = function(className) {
+var renderFlowchart = function(classNames) {
     if (!VEnableFlowchart) {
         return;
     }
@@ -478,7 +623,15 @@ var renderFlowchart = function(className) {
     flowchartIdx = 0;
     for (var i = 0; i < codes.length; ++i) {
         var code = codes[i];
-        if (code.classList.contains(className)) {
+        var matched = false;
+        for (var j = 0; j < classNames.length; ++j) {
+            if (code.classList.contains(classNames[j])) {
+                matched = true;
+                break;
+            }
+        }
+
+        if (matched) {
             if (renderFlowchartOne(code, flowchartIdx)) {
                 // replaceChild() will decrease codes.length.
                 --i;
@@ -493,7 +646,7 @@ var renderFlowchartOne = function(code) {
     // Flowchart code block.
     flowchartIdx++;
     try {
-        var graph = flowchart.parse(code.innerText);
+        var graph = flowchart.parse(code.textContent);
     } catch (err) {
         content.setLog("err: " + err);
         return false;
@@ -507,25 +660,120 @@ var renderFlowchartOne = function(code) {
     graphDiv.id = 'flowchart-diagram-' + flowchartIdx;
     graphDiv.classList.add(VFlowchartDivClass);
     var preNode = code.parentNode;
-    preNode.replaceChild(graphDiv, code);
+    var preParentNode = preNode.parentNode;
+    preParentNode.replaceChild(graphDiv, preNode);
 
     // Draw on it after adding it to page.
     try {
         graph.drawSVG(graphDiv.id);
+        setupSVGToView(graphDiv.children[0], true);
     } catch (err) {
         content.setLog("err: " + err);
-        preNode.replaceChild(code, graphDiv);
+        preParentNode.replaceChild(preNode, graphDiv);
         delete graphDiv;
         return false;
     }
 
-    preNode.classList.add(VMermaidDivClass);
     return true;
+};
+
+var plantUMLIdx = 0;
+var plantUMLCodeClass = 'plantuml_code_';
+
+// @className, the class name of the PlantUML code block, such as 'lang-puml'.
+var renderPlantUML = function(className) {
+    if (VPlantUMLMode == 0) {
+        return;
+    }
+
+    plantUMLIdx = 0;
+
+    var codes = document.getElementsByTagName('code');
+    for (var i = 0; i < codes.length; ++i) {
+        var code = codes[i];
+        if (code.classList.contains(className)) {
+            if (VPlantUMLMode == 1) {
+                if (renderPlantUMLOneOnline(code)) {
+                    // replaceChild() will decrease codes.length.
+                    --i;
+                }
+            } else {
+                renderPlantUMLOneLocal(code);
+            }
+        }
+    }
+};
+
+// Render @code as PlantUML graph.
+// Returns true if succeeded.
+var renderPlantUMLOneOnline = function(code) {
+    var s = unescape(encodeURIComponent(code.textContent));
+    var arr = [];
+    for (var i = 0; i < s.length; i++) {
+        arr.push(s.charCodeAt(i));
+    }
+
+    var compressor = new Zopfli.RawDeflate(arr);
+    var compressed = compressor.compress();
+    var url = VPlantUMLServer + "/" + VPlantUMLFormat + "/" + encode64_(compressed);
+
+    var obj = null;
+    if (VPlantUMLFormat == 'svg') {
+        var svgObj = document.createElement('object');
+        svgObj.type = 'image/svg+xml';
+        svgObj.data = url;
+
+        obj = document.createElement('div');
+        obj.classList.add(VPlantUMLDivClass);
+        obj.appendChild(svgObj);
+    } else {
+        obj = document.createElement('img');
+        obj.src = url;
+        setupIMGToView(obj);
+    }
+
+    var preNode = code.parentNode;
+    preNode.parentNode.replaceChild(obj, preNode);
+    return true;
+};
+
+var renderPlantUMLOneLocal = function(code) {
+    ++asyncJobsCount;
+    code.classList.add(plantUMLCodeClass + plantUMLIdx);
+    content.processPlantUML(plantUMLIdx, VPlantUMLFormat, code.textContent);
+    plantUMLIdx++;
+};
+
+var graphvizIdx = 0;
+var graphvizCodeClass = 'graphviz_code_';
+
+// @className, the class name of the Graghviz code block, such as 'lang-dot'.
+var renderGraphviz = function(className) {
+    if (!VEnableGraphviz) {
+        return;
+    }
+
+    graphvizIdx = 0;
+
+    var codes = document.getElementsByTagName('code');
+    for (var i = 0; i < codes.length; ++i) {
+        var code = codes[i];
+        if (code.classList.contains(className)) {
+            renderGraphvizOneLocal(code);
+        }
+    }
+};
+
+var renderGraphvizOneLocal = function(code) {
+    ++asyncJobsCount;
+    code.classList.add(graphvizCodeClass + graphvizIdx);
+    content.processGraphviz(graphvizIdx, VGraphvizFormat, code.textContent);
+    graphvizIdx++;
 };
 
 var isImageBlock = function(img) {
     var pn = img.parentNode;
-    return (pn.children.length == 1) && (pn.innerText == '');
+    return (pn.children.length == 1) && (pn.textContent == '');
 };
 
 var isImageWithBr = function(img) {
@@ -617,15 +865,25 @@ var insertImageCaption = function() {
         // Add caption.
         var captionDiv = document.createElement('div');
         captionDiv.classList.add(VImageCaptionClass);
-        captionDiv.innerText = img.alt;
+        captionDiv.textContent = img.alt;
         img.insertAdjacentElement('afterend', captionDiv);
     }
-}
+};
+
+var asyncJobsCount = 0;
+
+var finishOneAsyncJob = function() {
+    --asyncJobsCount;
+    finishLogics();
+};
 
 // The renderer specific code should call this function once thay have finished
 // markdown-specifi handle logics, such as Mermaid, MathJax.
 var finishLogics = function() {
-    content.finishLogics();
+    if (asyncJobsCount <= 0) {
+        content.finishLogics();
+        calculateWordCount();
+    }
 };
 
 // Escape @text to Html.
@@ -734,11 +992,17 @@ var handleToc = function(needToc) {
     var tocTree = tocToTree(toPerfectToc(toc, baseLevel), baseLevel);
     content.setToc(tocTree, baseLevel);
 
+    var removeToc = toc.length == 0;
+
     // Add it to html
     if (needToc) {
         var eles = document.getElementsByClassName('vnote-toc');
         for (var i = 0; i < eles.length; ++i) {
-            eles[i].innerHTML = tocTree;
+            if (removeToc) {
+                eles[i].parentNode.removeChild(eles[i]);
+            } else {
+                eles[i].innerHTML = tocTree;
+            }
         }
     }
 };
@@ -751,10 +1015,12 @@ var vds_scrolled = false;
 
 window.onmousedown = function(e) {
     e = e || window.event;
+    var isCtrl = VOS == 'mac' ? e.metaKey : e.ctrlKey;
     // Left button and Ctrl key.
     if (e.buttons == 1
-        && e.ctrlKey
-        && window.getSelection().rangeCount == 0) {
+        && isCtrl
+        && window.getSelection().type != 'Range'
+        && !isViewingImage()) {
         vds_oriMouseClientX = e.clientX;
         vds_oriMouseClientY = e.clientY;
         vds_readyToScroll = true;
@@ -876,7 +1142,7 @@ var jumpTitle = function(forward, relativeLevel, repeat) {
     // Disable scroll temporarily.
     g_muteScroll = true;
     headers[targetIdx].scrollIntoView();
-    highlightAnchor(headers[targetIdx]);
+    flashAnchor(headers[targetIdx]);
     currentHeaderIdx = targetIdx;
     content.setHeader(headers[targetIdx].getAttribute("id"));
     setTimeout("g_muteScroll = false", 100);
@@ -890,7 +1156,12 @@ var renderCodeBlockLineNumber = function() {
     var codes = document.getElementsByTagName('code');
     for (var i = 0; i < codes.length; ++i) {
         var code = codes[i];
-        if (code.parentElement.tagName.toLowerCase() == 'pre') {
+        var pare = code.parentElement;
+        if (pare.tagName.toLowerCase() == 'pre') {
+            if (VEnableMathjax && pare.classList.contains("lang-mathjax")) {
+                continue;
+            }
+
             hljs.lineNumbersBlock(code);
         }
     }
@@ -911,8 +1182,18 @@ var addClassToCodeBlock = function() {
     var codes = document.getElementsByTagName('code');
     for (var i = 0; i < codes.length; ++i) {
         var code = codes[i];
-        if (code.parentElement.tagName.toLowerCase() == 'pre') {
+        var pare = code.parentElement;
+        if (pare.tagName.toLowerCase() == 'pre') {
             code.classList.add(hljsClass);
+
+            if (VEnableMathjax
+                && (code.classList.contains("lang-mathjax")
+                    || code.classList.contains("language-mathjax"))) {
+                // Add the class to pre.
+                pare.classList.add("lang-mathjax");
+                pare.classList.add("language-mathjax");
+                pare.classList.add("tex-to-render");
+            }
         }
     }
 };
@@ -930,7 +1211,6 @@ var listContainsRegex = function(strs, exp) {
 var StylesToInline = null;
 
 var initStylesToInline = function() {
-    console.log('initStylesToInline');
     StylesToInline = new Map();
 
     if (VStylesToInline.length == 0) {
@@ -953,6 +1233,7 @@ var initStylesToInline = function() {
 };
 
 // Embed the CSS styles of @ele and all its children.
+// StylesToInline need to be init before.
 var embedInlineStyles = function(ele) {
     var tagName = ele.tagName.toLowerCase();
     var props = StylesToInline.get(tagName);
@@ -989,4 +1270,192 @@ var getHtmlWithInlineStyles = function(container) {
     }
 
     return container.innerHTML;
+};
+
+// Will be called after MathJax rendering finished.
+// Make <pre><code>math</code></pre> to <p>math</p>
+var postProcessMathJax = function() {
+    var all = MathJax.Hub.getAllJax();
+    for (var i = 0; i < all.length; ++i) {
+        var node = all[i].SourceElement().parentNode;
+        if (VRemoveMathjaxScript) {
+            // Remove the SourceElement.
+            try {
+                node.removeChild(all[i].SourceElement());
+            } catch (err) {
+                content.setLog("err: " + err);
+            }
+        }
+
+        if (node.tagName.toLowerCase() == 'code') {
+            var pre = node.parentNode;
+            var p = document.createElement('p');
+            p.innerHTML = node.innerHTML;
+            pre.parentNode.replaceChild(p, pre);
+        }
+    }
+
+    finishOneAsyncJob();
+};
+
+function getNodeText(el) {
+    ret = "";
+    var length = el.childNodes.length;
+    for(var i = 0; i < length; i++) {
+        var node = el.childNodes[i];
+        if(node.nodeType != 8) {
+            ret += node.nodeType != 1 ? node.nodeValue : getNodeText(node);
+        }
+    }
+
+    return ret;
+}
+
+var calculateWordCount = function() {
+    var words = getNodeText(contentDiv);
+
+    // Char without spaces.
+    var cns = 0;
+    var wc = 0;
+    var cc = words.length;
+    // 0 - not in word;
+    // 1 - in English word;
+    // 2 - in non-English word;
+    var state = 0;
+
+    for (var i = 0; i < cc; ++i) {
+        var ch = words[i];
+        if (/\s/.test(ch)) {
+            if (state != 0) {
+                state = 0;
+            }
+
+            continue;
+        } else if (ch.charCodeAt() < 128) {
+            if (state != 1) {
+                state = 1;
+                ++wc;
+            }
+        } else {
+            state = 2;
+            ++wc;
+        }
+
+        ++cns;
+    }
+
+    content.updateWordCountInfo(wc, cns, cc);
+};
+
+// Whether it is a special code block, such as MathJax, Mermaid, or Flowchart.
+var specialCodeBlock = function(lang) {
+    return (VEnableMathjax && lang == 'mathjax')
+           || (VEnableMermaid && lang == 'mermaid')
+           || (VEnableFlowchart && (lang == 'flowchart' || lang == 'flow'))
+           || (VPlantUMLMode != 0 && lang == 'puml')
+           || (VEnableGraphviz && lang == 'dot');
+};
+
+var handlePlantUMLResult = function(id, timeStamp, format, result) {
+    var code = document.getElementsByClassName(plantUMLCodeClass + id)[0];
+    if (code && result.length > 0) {
+        var obj = null;
+        if (format == 'svg') {
+            obj = document.createElement('div');
+            obj.classList.add(VPlantUMLDivClass);
+            obj.innerHTML = result;
+            setupSVGToView(obj.children[0], true);
+        } else {
+            obj = document.createElement('img');
+            obj.src = "data:image/" + format + ";base64, " + result;
+            setupIMGToView(obj);
+        }
+
+        var preNode = code.parentNode;
+        preNode.parentNode.replaceChild(obj, preNode);
+    }
+
+    finishOneAsyncJob();
+};
+
+var handleGraphvizResult = function(id, timeStamp, format, result) {
+    var code = document.getElementsByClassName(graphvizCodeClass + id)[0];
+    if (code && result.length > 0) {
+        var obj = null;
+        if (format == 'svg') {
+            obj = document.createElement('p');
+            obj.innerHTML = result;
+            setupSVGToView(obj.children[0]);
+        } else {
+            obj = document.createElement('img');
+            obj.src = "data:image/" + format + ";base64, " + result;
+            setupIMGToView(obj);
+        }
+
+        var preNode = code.parentNode;
+        preNode.parentNode.replaceChild(obj, preNode);
+    }
+
+    finishOneAsyncJob();
+};
+
+var setPreviewEnabled = function(enabled) {
+    if (enabled) {
+        contentDiv.style.display = 'none';
+        previewDiv.style.display = 'block';
+    } else {
+        contentDiv.style.display = 'block';
+        previewDiv.style.display = 'none';
+        previewDiv.innerHTML = '';
+    }
+};
+
+var previewCodeBlock = function(id, lang, text, isLivePreview) {
+    var div = isLivePreview ? previewDiv : inplacePreviewDiv;
+    div.innerHTML = '';
+    div.className = '';
+
+    if (text.length == 0
+        || (lang != 'flow'
+            && lang != 'flowchart'
+            && lang != 'mermaid'
+            && (lang != 'puml' || VPlantUMLMode != 1 || !isLivePreview))) {
+        return;
+    }
+
+    var pre = document.createElement('pre');
+    var code = document.createElement('code');
+    code.textContent = text;
+
+    pre.appendChild(code);
+    div.appendChild(pre);
+
+    if (lang == 'flow' || lang == 'flowchart') {
+        renderFlowchartOne(code);
+    } else if (lang == 'mermaid') {
+        renderMermaidOne(code);
+    } else if (lang == 'puml') {
+        renderPlantUMLOneOnline(code);
+    }
+
+    if (!isLivePreview) {
+        var children = div.children;
+        if (children.length > 0) {
+            content.previewCodeBlockCB(id, lang, children[0].innerHTML);
+        }
+
+        div.innerHTML = '';
+        div.className = '';
+    }
+};
+
+var setPreviewContent = function(lang, html) {
+    previewDiv.innerHTML = html;
+
+    // Treat plantUML and graphviz the same.
+    if (lang == "puml" || lang == "dot") {
+        previewDiv.classList = VPlantUMLDivClass;
+    } else {
+        previewDiv.className = '';
+    }
 };

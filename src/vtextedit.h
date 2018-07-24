@@ -5,7 +5,7 @@
 #include <QTextBlock>
 
 #include "vlinenumberarea.h"
-#include "vconstants.h"
+#include "vtextdocumentlayout.h"
 
 class VTextDocumentLayout;
 class QPainter;
@@ -33,7 +33,13 @@ public:
 
     void setLineNumberColor(const QColor &p_foreground, const QColor &p_background);
 
+    int firstVisibleBlockNumber() const;
+
     QTextBlock firstVisibleBlock() const;
+
+    QTextBlock lastVisibleBlock() const;
+
+    void visibleBlockRange(int &p_first, int &p_last) const;
 
     void clearBlockImages();
 
@@ -55,7 +61,7 @@ public:
 
     void setImageLineColor(const QColor &p_color);
 
-    void relayout(const QSet<int> &p_blocks);
+    void relayout(const OrderedIntSet &p_blocks);
 
     void setCursorBlockMode(CursorBlock p_mode);
 
@@ -65,11 +71,19 @@ public:
 
     void relayout();
 
+    void relayoutVisibleBlocks();
+
+    void setDisplayScaleFactor(qreal p_factor);
+
 protected:
     void resizeEvent(QResizeEvent *p_event) Q_DECL_OVERRIDE;
 
     // Return the Y offset of the content via the scrollbar.
     int contentOffsetY() const;
+
+    void updateLineNumberAreaWidth(const QFontMetrics &p_metrics);
+
+    void dragMoveEvent(QDragMoveEvent *p_event) Q_DECL_OVERRIDE;
 
 private slots:
     // Update viewport margin to hold the line number area.
@@ -91,6 +105,8 @@ private:
     CursorBlock m_cursorBlockMode;
 
     bool m_highlightCursorLineBlock;
+
+    int m_defaultCursorWidth;
 };
 
 inline void VTextEdit::setLineNumberType(LineNumberType p_type)

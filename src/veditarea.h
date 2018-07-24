@@ -20,6 +20,7 @@ class VDirectory;
 class VFindReplaceDialog;
 class QLabel;
 class VVim;
+class VMathJaxPreviewHelper;
 
 class VEditArea : public QWidget, public VNavigationMode
 {
@@ -43,6 +44,9 @@ public:
 
     // Return the @p_tabIdx tab in the @p_winIdx window.
     VEditTab *getTab(int p_winIdx, int p_tabIdx) const;
+
+    // Return the tab for @p_file file.
+    VEditTab *getTab(const VFile *p_file) const;
 
     // Return VEditTabInfo of all edit tabs.
     QVector<VEditTabInfo> getAllTabsInfo() const;
@@ -75,10 +79,21 @@ public:
     bool handleKeyNavigation(int p_key, bool &p_succeed) Q_DECL_OVERRIDE;
 
     // Open files @p_files.
-    int openFiles(const QVector<VFileSessionInfo> &p_files);
+    int openFiles(const QVector<VFileSessionInfo> &p_files, bool p_oneByOne = false);
 
     // Record a closed file in the stack.
     void recordClosedFile(const VFileSessionInfo &p_file);
+
+    // Return the rect not containing the tab bar.
+    QRect editAreaRect() const;
+
+    VMathJaxPreviewHelper *getMathJaxPreviewHelper() const;
+
+    // Maximize the width of current vertical split.
+    void maximizeCurrentSplit();
+
+    // Distribute all the splits evenly.
+    void distributeSplits();
 
 signals:
     // Emit when current window's tab status updated.
@@ -96,6 +111,9 @@ signals:
     // Emit when Vim status updated.
     void vimStatusUpdated(const VVim *p_vim);
 
+    // Emit when @p_file is closed.
+    void fileClosed(const QString &p_file);
+
 protected:
     void mousePressEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
 
@@ -109,7 +127,9 @@ public slots:
 
     void editFile();
     void saveFile();
-    void readFile();
+
+    void readFile(bool p_discard = false);
+
     void saveAndReadFile();
 
     // Scroll current tab to @p_header.
@@ -172,11 +192,7 @@ private:
     // Init targets for Captain mode.
     void registerCaptainTargets();
 
-    // Check whether opened files have been changed outside.
-    void checkFileChangeOutside();
-
     // Captain mode functions.
-
     // Activate tab @p_idx.
     static bool activateTabByCaptain(void *p_target, void *p_data, int p_idx);
 
@@ -200,11 +216,18 @@ private:
 
     static bool removeSplitByCaptain(void *p_target, void *p_data);
 
+    static bool maximizeSplitByCaptain(void *p_target, void *p_data);
+
+    static bool distributeSplitsByCaptain(void *p_target, void *p_data);
+
     // Evaluate selected text or the word on cursor as magic words.
     static bool evaluateMagicWordsByCaptain(void *p_target, void *p_data);
 
     // Prompt for user to apply a snippet.
     static bool applySnippetByCaptain(void *p_target, void *p_data);
+
+    // Toggle live preview.
+    static bool toggleLivePreviewByCaptain(void *p_target, void *p_data);
 
     // End Captain mode functions.
 
@@ -216,6 +239,11 @@ private:
 
     // Last closed files stack.
     QStack<VFileSessionInfo> m_lastClosedFiles;
+
+    // Whether auto save files.
+    bool m_autoSave;
+
+    VMathJaxPreviewHelper *m_mathPreviewHelper;
 };
 
 inline VEditWindow* VEditArea::getWindow(int windowIndex) const
@@ -234,4 +262,8 @@ inline VFindReplaceDialog *VEditArea::getFindReplaceDialog() const
     return m_findReplace;
 }
 
+inline VMathJaxPreviewHelper *VEditArea::getMathJaxPreviewHelper() const
+{
+    return m_mathPreviewHelper;
+}
 #endif // VEDITAREA_H

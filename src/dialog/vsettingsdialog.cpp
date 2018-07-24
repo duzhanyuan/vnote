@@ -1,10 +1,14 @@
 #include "vsettingsdialog.h"
 #include <QtWidgets>
 #include <QRegExp>
+#include <QToolTip>
+
 #include "vconfigmanager.h"
 #include "utils/vutils.h"
 #include "vconstants.h"
 #include "vlineedit.h"
+#include "vplantumlhelper.h"
+#include "vgraphvizhelper.h"
 
 extern VConfigManager *g_config;
 
@@ -23,12 +27,19 @@ VSettingsDialog::VSettingsDialog(QWidget *p_parent)
     connect(m_resetVNoteBtn, &QPushButton::clicked,
             this, &VSettingsDialog::resetVNote);
 
+    // Reset Layout.
+    m_resetLayoutBtn = new QPushButton(tr("Reset Layout"), this);
+    m_resetLayoutBtn->setToolTip(tr("Reset layout of VNote"));
+    connect(m_resetLayoutBtn, &QPushButton::clicked,
+            this, &VSettingsDialog::resetLayout);
+
     m_btnBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(m_btnBox, &QDialogButtonBox::accepted, this, &VSettingsDialog::saveConfiguration);
     connect(m_btnBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     m_btnBox->button(QDialogButtonBox::Ok)->setProperty("SpecialBtn", true);
 
     m_btnBox->addButton(m_resetVNoteBtn, QDialogButtonBox::ResetRole);
+    m_btnBox->addButton(m_resetLayoutBtn, QDialogButtonBox::ResetRole);
 
     QHBoxLayout *tabLayout = new QHBoxLayout();
     tabLayout->addWidget(m_tabList);
@@ -47,6 +58,7 @@ VSettingsDialog::VSettingsDialog(QWidget *p_parent)
 
     // Add tabs.
     addTab(new VGeneralTab(), tr("General"));
+    addTab(new VLookTab(), tr("Appearance"));
     addTab(new VReadEditTab(), tr("Read/Edit"));
     addTab(new VNoteManagementTab(), tr("Note Management"));
     addTab(new VMarkdownTab(), tr("Markdown"));
@@ -97,6 +109,35 @@ void VSettingsDialog::resetVNote()
     reject();
 }
 
+void VSettingsDialog::resetLayout()
+{
+    int ret = VUtils::showMessage(QMessageBox::Warning,
+                                  tr("Warning"),
+                                  tr("Are you sure to reset the layout of VNote?"),
+                                  tr("The view and layout mode will be reset. "
+                                     "It is UNRECOVERABLE!"),
+                                  QMessageBox::Ok | QMessageBox::Cancel,
+                                  QMessageBox::Cancel,
+                                  this,
+                                  MessageBoxType::Danger);
+
+    if (ret == QMessageBox::Cancel) {
+        return;
+    }
+
+    g_config->resetLayoutConfigurations();
+
+    VUtils::showMessage(QMessageBox::Information,
+                        tr("Information"),
+                        tr("Please restart VNote to make it work."),
+                        tr("Any change to VNote before restart will be lost!"),
+                        QMessageBox::Ok,
+                        QMessageBox::Ok,
+                        this);
+
+    reject();
+}
+
 void VSettingsDialog::addTab(QWidget *p_widget, const QString &p_label)
 {
     int idx = m_tabs->addWidget(p_widget);
@@ -106,18 +147,28 @@ void VSettingsDialog::addTab(QWidget *p_widget, const QString &p_label)
 
 void VSettingsDialog::loadConfiguration()
 {
+    int idx = 0;
     // General Tab.
     {
-        VGeneralTab *generalTab = dynamic_cast<VGeneralTab *>(m_tabs->widget(0));
+        VGeneralTab *generalTab = dynamic_cast<VGeneralTab *>(m_tabs->widget(idx++));
         Q_ASSERT(generalTab);
         if (!generalTab->loadConfiguration()) {
             goto err;
         }
     }
 
+    // Appearance Tab.
+    {
+        VLookTab *lookTab = dynamic_cast<VLookTab *>(m_tabs->widget(idx++));
+        Q_ASSERT(lookTab);
+        if (!lookTab->loadConfiguration()) {
+            goto err;
+        }
+    }
+
     // Read/Edit Tab.
     {
-        VReadEditTab *readEditTab = dynamic_cast<VReadEditTab *>(m_tabs->widget(1));
+        VReadEditTab *readEditTab = dynamic_cast<VReadEditTab *>(m_tabs->widget(idx++));
         Q_ASSERT(readEditTab);
         if (!readEditTab->loadConfiguration()) {
             goto err;
@@ -126,7 +177,7 @@ void VSettingsDialog::loadConfiguration()
 
     // Note Management Tab.
     {
-        VNoteManagementTab *noteManagementTab = dynamic_cast<VNoteManagementTab *>(m_tabs->widget(2));
+        VNoteManagementTab *noteManagementTab = dynamic_cast<VNoteManagementTab *>(m_tabs->widget(idx++));
         Q_ASSERT(noteManagementTab);
         if (!noteManagementTab->loadConfiguration()) {
             goto err;
@@ -135,7 +186,7 @@ void VSettingsDialog::loadConfiguration()
 
     // Markdown Tab.
     {
-        VMarkdownTab *markdownTab = dynamic_cast<VMarkdownTab *>(m_tabs->widget(3));
+        VMarkdownTab *markdownTab = dynamic_cast<VMarkdownTab *>(m_tabs->widget(idx++));
         Q_ASSERT(markdownTab);
         if (!markdownTab->loadConfiguration()) {
             goto err;
@@ -152,18 +203,28 @@ err:
 
 void VSettingsDialog::saveConfiguration()
 {
+    int idx = 0;
     // General Tab.
     {
-        VGeneralTab *generalTab = dynamic_cast<VGeneralTab *>(m_tabs->widget(0));
+        VGeneralTab *generalTab = dynamic_cast<VGeneralTab *>(m_tabs->widget(idx++));
         Q_ASSERT(generalTab);
         if (!generalTab->saveConfiguration()) {
             goto err;
         }
     }
 
+    // Appearance Tab.
+    {
+        VLookTab *lookTab = dynamic_cast<VLookTab *>(m_tabs->widget(idx++));
+        Q_ASSERT(lookTab);
+        if (!lookTab->saveConfiguration()) {
+            goto err;
+        }
+    }
+
     // Read/Edit Tab.
     {
-        VReadEditTab *readEditTab = dynamic_cast<VReadEditTab *>(m_tabs->widget(1));
+        VReadEditTab *readEditTab = dynamic_cast<VReadEditTab *>(m_tabs->widget(idx++));
         Q_ASSERT(readEditTab);
         if (!readEditTab->saveConfiguration()) {
             goto err;
@@ -172,7 +233,7 @@ void VSettingsDialog::saveConfiguration()
 
     // Note Management Tab.
     {
-        VNoteManagementTab *noteManagementTab = dynamic_cast<VNoteManagementTab *>(m_tabs->widget(2));
+        VNoteManagementTab *noteManagementTab = dynamic_cast<VNoteManagementTab *>(m_tabs->widget(idx++));
         Q_ASSERT(noteManagementTab);
         if (!noteManagementTab->saveConfiguration()) {
             goto err;
@@ -181,7 +242,7 @@ void VSettingsDialog::saveConfiguration()
 
     // Markdown Tab.
     {
-        VMarkdownTab *markdownTab = dynamic_cast<VMarkdownTab *>(m_tabs->widget(3));
+        VMarkdownTab *markdownTab = dynamic_cast<VMarkdownTab *>(m_tabs->widget(idx++));
         Q_ASSERT(markdownTab);
         if (!markdownTab->saveConfiguration()) {
             goto err;
@@ -405,11 +466,105 @@ bool VGeneralTab::saveStartupPageType()
     return true;
 }
 
+VLookTab::VLookTab(QWidget *p_parent)
+    : QWidget(p_parent)
+{
+    m_tbIconSizeSpin = new QSpinBox(this);
+    m_tbIconSizeSpin->setToolTip(tr("Icon size in pixel of tool bar (restart VNote to make it work)"));
+    m_tbIconSizeSpin->setMaximum(100);
+    m_tbIconSizeSpin->setMinimum(5);
+
+    QFormLayout *layout = new QFormLayout();
+    layout->addRow(tr("Tool bar icon size:"), m_tbIconSizeSpin);
+
+    setLayout(layout);
+}
+
+bool VLookTab::loadConfiguration()
+{
+    if (!loadToolBarIconSize()) {
+        return false;
+    }
+
+    return true;
+}
+
+bool VLookTab::saveConfiguration()
+{
+    if (!saveToolBarIconSize()) {
+        return false;
+    }
+
+    return true;
+}
+
+bool VLookTab::loadToolBarIconSize()
+{
+    int sz = g_config->getToolBarIconSize();
+    m_tbIconSizeSpin->setValue(sz);
+    return true;
+}
+
+bool VLookTab::saveToolBarIconSize()
+{
+    g_config->setToolBarIconSize(m_tbIconSizeSpin->value());
+    return true;
+}
+
 VReadEditTab::VReadEditTab(QWidget *p_parent)
     : QWidget(p_parent)
 {
     m_readBox = new QGroupBox(tr("Read Mode (For Markdown Only)"));
     m_editBox = new QGroupBox(tr("Edit Mode"));
+
+    // Web Zoom Factor.
+    m_customWebZoom = new QCheckBox(tr("Custom Web zoom factor"));
+    m_customWebZoom->setToolTip(tr("Set the zoom factor of the Web page when reading"));
+    m_webZoomFactorSpin = new QDoubleSpinBox();
+    m_webZoomFactorSpin->setMaximum(c_webZoomFactorMax);
+    m_webZoomFactorSpin->setMinimum(c_webZoomFactorMin);
+    m_webZoomFactorSpin->setSingleStep(0.25);
+    connect(m_customWebZoom, &QCheckBox::stateChanged,
+            this, [this](int p_state) {
+                this->m_webZoomFactorSpin->setEnabled(p_state == Qt::Checked);
+            });
+    QHBoxLayout *zoomFactorLayout = new QHBoxLayout();
+    zoomFactorLayout->addWidget(m_customWebZoom);
+    zoomFactorLayout->addWidget(m_webZoomFactorSpin);
+
+    // Web flash anchor.
+    m_flashAnchor = new QCheckBox(tr("Flash current heading"));
+    m_flashAnchor->setToolTip(tr("Flash current heading on change"));
+
+    // Swap file.
+    m_swapFile = new QCheckBox(tr("Swap file"));
+    m_swapFile->setToolTip(tr("Automatically save changes to a swap file for backup"));
+    connect(m_swapFile, &QCheckBox::stateChanged,
+            this, &VReadEditTab::showTipsAboutAutoSave);
+
+    // Auto save.
+    m_autoSave = new QCheckBox(tr("Auto save"));
+    m_autoSave->setToolTip(tr("Automatically save the note when editing"));
+    connect(m_autoSave, &QCheckBox::stateChanged,
+            this, &VReadEditTab::showTipsAboutAutoSave);
+
+    // Editor zoom delta.
+    m_editorZoomDeltaSpin = new QSpinBox();
+    m_editorZoomDeltaSpin->setToolTip(tr("Set the zoom delta of the editor font"));
+    m_editorZoomDeltaSpin->setMaximum(c_editorZoomDeltaMax);
+    m_editorZoomDeltaSpin->setMinimum(c_editorZoomDeltaMin);
+    m_editorZoomDeltaSpin->setSingleStep(1);
+
+    QVBoxLayout *readLayout = new QVBoxLayout();
+    readLayout->addLayout(zoomFactorLayout);
+    readLayout->addWidget(m_flashAnchor);
+    m_readBox->setLayout(readLayout);
+
+    QFormLayout *editLayout = new QFormLayout();
+    editLayout->addRow(m_swapFile);
+    editLayout->addRow(m_autoSave);
+    editLayout->addRow(tr("Editor zoom delta:"), m_editorZoomDeltaSpin);
+    m_editBox->setLayout(editLayout);
 
     QVBoxLayout *mainLayout = new QVBoxLayout();
     mainLayout->addWidget(m_readBox);
@@ -417,13 +572,143 @@ VReadEditTab::VReadEditTab(QWidget *p_parent)
     setLayout(mainLayout);
 }
 
+void VReadEditTab::showTipsAboutAutoSave()
+{
+    if (m_autoSave->isChecked() && m_swapFile->isChecked()) {
+        // Show a tooltip.
+        QPoint pos = m_editBox->mapToGlobal(QPoint(0, 0));
+        QToolTip::showText(pos,
+                           tr("It's recommended to enable \"Swap file\" "
+                              "or \"Auto save\", not both"),
+                            m_editBox);
+    }
+}
+
 bool VReadEditTab::loadConfiguration()
 {
+    if (!loadWebZoomFactor()) {
+        return false;
+    }
+
+    if (!loadFlashAnchor()) {
+        return false;
+    }
+
+    if (!loadSwapFile()) {
+        return false;
+    }
+
+    if (!loadAutoSave()) {
+        return false;
+    }
+
+    if (!loadEditorZoomDelta()) {
+        return false;
+    }
+
     return true;
 }
 
 bool VReadEditTab::saveConfiguration()
 {
+    if (!saveWebZoomFactor()) {
+        return false;
+    }
+
+    if (!saveFlashAnchor()) {
+        return false;
+    }
+
+    if (!saveSwapFile()) {
+        return false;
+    }
+
+    if (!saveAutoSave()) {
+        return false;
+    }
+
+    if (!saveEditorZoomDelta()) {
+        return false;
+    }
+
+    return true;
+}
+
+bool VReadEditTab::loadWebZoomFactor()
+{
+    qreal factor = g_config->getWebZoomFactor();
+    bool customFactor = g_config->isCustomWebZoomFactor();
+    if (customFactor) {
+        if (factor < c_webZoomFactorMin || factor > c_webZoomFactorMax) {
+            factor = 1;
+        }
+        m_customWebZoom->setChecked(true);
+        m_webZoomFactorSpin->setValue(factor);
+    } else {
+        m_customWebZoom->setChecked(false);
+        m_webZoomFactorSpin->setValue(factor);
+        m_webZoomFactorSpin->setEnabled(false);
+    }
+
+    return true;
+}
+
+bool VReadEditTab::saveWebZoomFactor()
+{
+    if (m_customWebZoom->isChecked()) {
+        g_config->setWebZoomFactor(m_webZoomFactorSpin->value());
+    } else {
+        g_config->setWebZoomFactor(-1);
+    }
+
+    return true;
+}
+
+bool VReadEditTab::loadEditorZoomDelta()
+{
+    m_editorZoomDeltaSpin->setValue(g_config->getEditorZoomDelta());
+    return true;
+}
+
+bool VReadEditTab::saveEditorZoomDelta()
+{
+    g_config->setEditorZoomDelta(m_editorZoomDeltaSpin->value());
+    return true;
+}
+
+bool VReadEditTab::loadFlashAnchor()
+{
+    m_flashAnchor->setChecked(g_config->getEnableFlashAnchor());
+    return true;
+}
+
+bool VReadEditTab::saveFlashAnchor()
+{
+    g_config->setEnableFlashAnchor(m_flashAnchor->isChecked());
+    return true;
+}
+
+bool VReadEditTab::loadSwapFile()
+{
+    m_swapFile->setChecked(g_config->getEnableBackupFile());
+    return true;
+}
+
+bool VReadEditTab::saveSwapFile()
+{
+    g_config->setEnableBackupFile(m_swapFile->isChecked());
+    return true;
+}
+
+bool VReadEditTab::loadAutoSave()
+{
+    m_autoSave->setChecked(g_config->getEnableAutoSave());
+    return true;
+}
+
+bool VReadEditTab::saveAutoSave()
+{
+    g_config->setEnableAutoSave(m_autoSave->isChecked());
     return true;
 }
 
@@ -468,9 +753,15 @@ VNoteManagementTab::VNoteManagementTab(QWidget *p_parent)
     attachmentFolderLayout->addWidget(m_customAttachmentFolder);
     attachmentFolderLayout->addWidget(m_attachmentFolderEdit);
 
+    // Single click open.
+    m_singleClickOpen = new QCheckBox(tr("Single click to open a note in current tab"), this);
+    m_singleClickOpen->setToolTip(tr("Single click a note in the notes list to open it in current tab, "
+                                     "double click to open it in a new tab"));
+
     QFormLayout *noteLayout = new QFormLayout();
     noteLayout->addRow(imageFolderLayout);
     noteLayout->addRow(attachmentFolderLayout);
+    noteLayout->addRow(m_singleClickOpen);
     m_noteBox->setLayout(noteLayout);
 
     // External File.
@@ -517,6 +808,10 @@ bool VNoteManagementTab::loadConfiguration()
         return false;
     }
 
+    if (!loadSingleClickOpen()) {
+        return false;
+    }
+
     return true;
 }
 
@@ -531,6 +826,10 @@ bool VNoteManagementTab::saveConfiguration()
     }
 
     if (!saveImageFolderExt()) {
+        return false;
+    }
+
+    if (!saveSingleClickOpen()) {
         return false;
     }
 
@@ -636,12 +935,24 @@ void VNoteManagementTab::customImageFolderExtChanged(int p_state)
     }
 }
 
+bool VNoteManagementTab::loadSingleClickOpen()
+{
+    m_singleClickOpen->setChecked(g_config->getSingleClickClosePreviousTab());
+    return true;
+}
+
+bool VNoteManagementTab::saveSingleClickOpen()
+{
+    g_config->setSingleClickClosePreviousTab(m_singleClickOpen->isChecked());
+    return true;
+}
+
 VMarkdownTab::VMarkdownTab(QWidget *p_parent)
     : QWidget(p_parent)
 {
     // Default note open mode.
     m_openModeCombo = VUtils::getComboBox();
-    m_openModeCombo->setToolTip(tr("Default mode to open a note"));
+    m_openModeCombo->setToolTip(tr("Default mode to open a file"));
     m_openModeCombo->addItem(tr("Read Mode"), (int)OpenFileMode::Read);
     m_openModeCombo->addItem(tr("Edit Mode"), (int)OpenFileMode::Edit);
 
@@ -650,7 +961,7 @@ VMarkdownTab::VMarkdownTab(QWidget *p_parent)
     m_headingSequenceTypeCombo->setToolTip(tr("Enable auto sequence for all headings (in the form like 1.2.3.4.)"));
     m_headingSequenceTypeCombo->addItem(tr("Disabled"), (int)HeadingSequenceType::Disabled);
     m_headingSequenceTypeCombo->addItem(tr("Enabled"), (int)HeadingSequenceType::Enabled);
-    m_headingSequenceTypeCombo->addItem(tr("Enabled for notes only"), (int)HeadingSequenceType::EnabledNoteOnly);
+    m_headingSequenceTypeCombo->addItem(tr("Enabled for intrenal notes only"), (int)HeadingSequenceType::EnabledNoteOnly);
 
     m_headingSequenceLevelCombo = VUtils::getComboBox();
     m_headingSequenceLevelCombo->setToolTip(tr("Base level to start heading sequence"));
@@ -674,21 +985,6 @@ VMarkdownTab::VMarkdownTab(QWidget *p_parent)
     headingSequenceLayout->addWidget(m_headingSequenceTypeCombo);
     headingSequenceLayout->addWidget(m_headingSequenceLevelCombo);
 
-    // Web Zoom Factor.
-    m_customWebZoom = new QCheckBox(tr("Custom Web zoom factor"), this);
-    m_customWebZoom->setToolTip(tr("Set the zoom factor of the Web page when reading"));
-    m_webZoomFactorSpin = new QDoubleSpinBox(this);
-    m_webZoomFactorSpin->setMaximum(c_webZoomFactorMax);
-    m_webZoomFactorSpin->setMinimum(c_webZoomFactorMin);
-    m_webZoomFactorSpin->setSingleStep(0.25);
-    connect(m_customWebZoom, &QCheckBox::stateChanged,
-            this, [this](int p_state){
-                this->m_webZoomFactorSpin->setEnabled(p_state == Qt::Checked);
-            });
-    QHBoxLayout *zoomFactorLayout = new QHBoxLayout();
-    zoomFactorLayout->addWidget(m_customWebZoom);
-    zoomFactorLayout->addWidget(m_webZoomFactorSpin);
-
     // Color column.
     m_colorColumnEdit = new VLineEdit();
     m_colorColumnEdit->setToolTip(tr("Specify the screen column in fenced code block "
@@ -699,11 +995,108 @@ VMarkdownTab::VMarkdownTab(QWidget *p_parent)
     QLabel *colorColumnLabel = new QLabel(tr("Color column:"));
     colorColumnLabel->setToolTip(m_colorColumnEdit->toolTip());
 
+    // MathJax.
+    m_mathjaxConfigEdit = new VLineEdit();
+    m_mathjaxConfigEdit->setToolTip(tr("Location of MathJax JavaScript and its configuration "
+                                       "(restart VNote to make it work in in-place preview)"));
+
+    // PlantUML.
+    m_plantUMLModeCombo = VUtils::getComboBox();
+    m_plantUMLModeCombo->setToolTip(tr("Enable PlantUML support in Markdown"));
+    m_plantUMLModeCombo->addItem(tr("Disabled"), PlantUMLMode::DisablePlantUML);
+    m_plantUMLModeCombo->addItem(tr("Online Service"), PlantUMLMode::OnlinePlantUML);
+    m_plantUMLModeCombo->addItem(tr("Local JAR"), PlantUMLMode::LocalPlantUML);
+
+    m_plantUMLServerEdit = new VLineEdit();
+    m_plantUMLServerEdit->setToolTip(tr("Server address for online PlantUML"));
+
+    m_plantUMLJarEdit = new VLineEdit();
+    m_plantUMLJarEdit->setToolTip(tr("Location to the PlantUML JAR executable for local PlantUML"));
+
+    QPushButton *plantUMLJarTestBtn = new QPushButton(tr("Test"));
+    plantUMLJarTestBtn->setToolTip(tr("Test PlantUML JAR configuration"));
+    connect(plantUMLJarTestBtn, &QPushButton::clicked,
+            this, [this]() {
+                QString jar = m_plantUMLJarEdit->text();
+                if (jar.isEmpty() || !QFileInfo::exists(jar)) {
+                    VUtils::showMessage(QMessageBox::Warning,
+                                        tr("Warning"),
+                                        tr("The JAR file specified does not exist."),
+                                        tr("Please input the right absolute file path to the JAR file."),
+                                        QMessageBox::Ok,
+                                        QMessageBox::Ok,
+                                        this);
+                    return;
+                }
+
+                if (!jar.trimmed().toLower().endsWith(".jar")) {
+                    VUtils::showMessage(QMessageBox::Warning,
+                                        tr("Warning"),
+                                        tr("Please specify the absolute file path to the JAR file."),
+                                        tr("It should be something like \"/path/to/plantuml.jar\"."),
+                                        QMessageBox::Ok,
+                                        QMessageBox::Ok,
+                                        this);
+                    return;
+                }
+
+                QString msg;
+                bool ret = VPlantUMLHelper::testPlantUMLJar(jar, msg);
+                VUtils::showMessage(QMessageBox::Information,
+                                    tr("Information"),
+                                    tr("Test %1.").arg((ret ? tr("succeeded") : tr("failed"))),
+                                    msg,
+                                    QMessageBox::Ok,
+                                    QMessageBox::Ok,
+                                    this);
+            });
+
+    QHBoxLayout *plantUMLLayout = new QHBoxLayout();
+    plantUMLLayout->addWidget(m_plantUMLJarEdit);
+    plantUMLLayout->addWidget(plantUMLJarTestBtn);
+
+    // Graphviz.
+    m_graphvizCB = new QCheckBox(tr("Graphviz"));
+    m_graphvizCB->setToolTip(tr("Enable Graphviz for drawing graph"));
+
+    m_graphvizDotEdit = new VLineEdit();
+    m_graphvizDotEdit->setPlaceholderText(tr("Empty to detect automatically"));
+    m_graphvizDotEdit->setToolTip(tr("Location to the GraphViz dot executable"));
+
+    QPushButton *graphvizTestBtn = new QPushButton(tr("Test"));
+    graphvizTestBtn->setToolTip(tr("Test Graphviz executable configuration"));
+    connect(graphvizTestBtn, &QPushButton::clicked,
+            this, [this]() {
+                QString dot = m_graphvizDotEdit->text();
+                if (dot.isEmpty()) {
+                    dot = "dot";
+                }
+
+                QString msg;
+                bool ret = VGraphvizHelper::testGraphviz(dot, msg);
+                VUtils::showMessage(QMessageBox::Information,
+                                    tr("Information"),
+                                    tr("Test %1.").arg((ret ? tr("succeeded") : tr("failed"))),
+                                    msg,
+                                    QMessageBox::Ok,
+                                    QMessageBox::Ok,
+                                    this);
+            });
+
+    QHBoxLayout *graphvizLayout = new QHBoxLayout();
+    graphvizLayout->addWidget(m_graphvizDotEdit);
+    graphvizLayout->addWidget(graphvizTestBtn);
+
     QFormLayout *mainLayout = new QFormLayout();
-    mainLayout->addRow(tr("Note open mode:"), m_openModeCombo);
+    mainLayout->addRow(tr("Open mode:"), m_openModeCombo);
     mainLayout->addRow(tr("Heading sequence:"), headingSequenceLayout);
-    mainLayout->addRow(zoomFactorLayout);
     mainLayout->addRow(colorColumnLabel, m_colorColumnEdit);
+    mainLayout->addRow(tr("MathJax configuration:"), m_mathjaxConfigEdit);
+    mainLayout->addRow(tr("PlantUML:"), m_plantUMLModeCombo);
+    mainLayout->addRow(tr("PlantUML server:"), m_plantUMLServerEdit);
+    mainLayout->addRow(tr("PlantUML JAR:"), plantUMLLayout);
+    mainLayout->addRow(m_graphvizCB);
+    mainLayout->addRow(tr("Graphviz executable:"), graphvizLayout);
 
     setLayout(mainLayout);
 }
@@ -718,11 +1111,19 @@ bool VMarkdownTab::loadConfiguration()
         return false;
     }
 
-    if (!loadWebZoomFactor()) {
+    if (!loadColorColumn()) {
         return false;
     }
 
-    if (!loadColorColumn()) {
+    if (!loadMathJax()) {
+        return false;
+    }
+
+    if (!loadPlantUML()) {
+        return false;
+    }
+
+    if (!loadGraphviz()) {
         return false;
     }
 
@@ -739,11 +1140,19 @@ bool VMarkdownTab::saveConfiguration()
         return false;
     }
 
-    if (!saveWebZoomFactor()) {
+    if (!saveColorColumn()) {
         return false;
     }
 
-    if (!saveColorColumn()) {
+    if (!saveMathJax()) {
+        return false;
+    }
+
+    if (!savePlantUML()) {
+        return false;
+    }
+
+    if (!saveGraphviz()) {
         return false;
     }
 
@@ -800,36 +1209,6 @@ bool VMarkdownTab::saveHeadingSequence()
     return true;
 }
 
-bool VMarkdownTab::loadWebZoomFactor()
-{
-    qreal factor = g_config->getWebZoomFactor();
-    bool customFactor = g_config->isCustomWebZoomFactor();
-    if (customFactor) {
-        if (factor < c_webZoomFactorMin || factor > c_webZoomFactorMax) {
-            factor = 1;
-        }
-        m_customWebZoom->setChecked(true);
-        m_webZoomFactorSpin->setValue(factor);
-    } else {
-        m_customWebZoom->setChecked(false);
-        m_webZoomFactorSpin->setValue(factor);
-        m_webZoomFactorSpin->setEnabled(false);
-    }
-
-    return true;
-}
-
-bool VMarkdownTab::saveWebZoomFactor()
-{
-    if (m_customWebZoom->isChecked()) {
-        g_config->setWebZoomFactor(m_webZoomFactorSpin->value());
-    } else {
-        g_config->setWebZoomFactor(-1);
-    }
-
-    return true;
-}
-
 bool VMarkdownTab::loadColorColumn()
 {
     int colorColumn = g_config->getColorColumn();
@@ -848,3 +1227,44 @@ bool VMarkdownTab::saveColorColumn()
     return true;
 }
 
+bool VMarkdownTab::loadMathJax()
+{
+    m_mathjaxConfigEdit->setText(g_config->getMathjaxJavascript());
+    return true;
+}
+
+bool VMarkdownTab::saveMathJax()
+{
+    g_config->setMathjaxJavascript(m_mathjaxConfigEdit->text());
+    return true;
+}
+
+bool VMarkdownTab::loadPlantUML()
+{
+    m_plantUMLModeCombo->setCurrentIndex(m_plantUMLModeCombo->findData(g_config->getPlantUMLMode()));
+    m_plantUMLServerEdit->setText(g_config->getPlantUMLServer());
+    m_plantUMLJarEdit->setText(g_config->getPlantUMLJar());
+    return true;
+}
+
+bool VMarkdownTab::savePlantUML()
+{
+    g_config->setPlantUMLMode(m_plantUMLModeCombo->currentData().toInt());
+    g_config->setPlantUMLServer(m_plantUMLServerEdit->text());
+    g_config->setPlantUMLJar(m_plantUMLJarEdit->text());
+    return true;
+}
+
+bool VMarkdownTab::loadGraphviz()
+{
+    m_graphvizCB->setChecked(g_config->getEnableGraphviz());
+    m_graphvizDotEdit->setText(g_config->getGraphvizDot());
+    return true;
+}
+
+bool VMarkdownTab::saveGraphviz()
+{
+    g_config->setEnableGraphviz(m_graphvizCB->isChecked());
+    g_config->setGraphvizDot(m_graphvizDotEdit->text());
+    return true;
+}

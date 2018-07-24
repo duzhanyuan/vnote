@@ -11,7 +11,7 @@
 editor
 # QTextEdit just choose the first available font, so specify the Chinese fonts first
 # Do not use "" to quote the name
-font-family: Hiragino Sans GB, 冬青黑体, Microsoft YaHei, 微软雅黑, Microsoft YaHei UI, WenQuanYi Micro Hei, 文泉驿雅黑, Dengxian, 等线体, STXihei, 华文细黑, Liberation Sans, Droid Sans, NSimSun, 新宋体, SimSun, 宋体, Helvetica, sans-serif, Tahoma, Arial, Verdana, Geneva, Georgia, Times New Roman
+font-family: Hiragino Sans GB, 冬青黑体, Microsoft YaHei, 微软雅黑, Microsoft YaHei UI, WenQuanYi Micro Hei, 文泉驿雅黑, Dengxian, 等线体, STXihei, 华文细黑, Liberation Sans, Droid Sans, NSimSun, 新宋体, SimSun, 宋体, Verdana, Helvetica, sans-serif, Tahoma, Arial, Geneva, Georgia, Times New Roman
 font-size: 12
 foreground: abb2bf
 background: 282c34
@@ -19,7 +19,7 @@ background: 282c34
 trailing-space: 636d81
 # [VNote] Style for line number
 line-number-background: 2c313a
-line-number-foreground: 5c6370
+line-number-foreground: 6e7686
 # [VNote] Style for selected word highlight
 selected-word-foreground: 222222
 selected-word-background: dfdf00
@@ -35,12 +35,14 @@ incremental-searched-word-background: ce93d8
 # [VNote] Style for color column in fenced code block
 color-column-background: c9302c
 color-column-foreground: eeeeee
-# [VNote} Style for preview image line
+# [VNote] Style for preview image line
 preview-image-line-foreground: 6f5799
+# [VNote] Style for preview image (useful for SVG in dark theme)
+preview-image-background: b0bec5
 
 editor-selection
-foreground: dadada
-background: 1e88e5
+foreground: bcbcbc
+background: 1976d2
 
 editor-current-line
 background: 353d49
@@ -49,7 +51,7 @@ vim-insert-background: 353d49
 # [VNote] Vim normal mode cursor line background
 vim-normal-background: 373c47
 # [VNote] Vim visual mode cursor line background
-vim-visual-background: 105fa2
+vim-visual-background: 0d47a1
 # [VNote] Vim replace mode cursor line background
 vim-replace-background: 2f3377
 
@@ -84,7 +86,8 @@ font-style: bold
 font-size: +2
 
 HRULE
-foreground: 8b90f3
+foreground: abb2bf
+background: 493134
 
 LIST_BULLET
 foreground: e06c75
@@ -123,16 +126,20 @@ HTML_ENTITY
 foreground: abb2bf
 
 COMMENT
-foreground: 5c6370
+foreground: 6e7686
 
 VERBATIM
 foreground: 98c379
 font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New
-# [VNote] Codeblock sylte from HighlightJS (bold, italic, underlined, color)
+
+FENCEDCODEBLOCK
+foreground: 98c379
+font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New
+# [VNote] Codeblock sylte from HighlightJS (bold, italic, underlined, strikeout, color)
 # The last occurence of the same attribute takes effect
 # Could specify multiple attribute in one line
-hljs-comment: 5c6370
-hljs-quote: 5c6370
+hljs-comment: 6e7686
+hljs-quote: 6e7686
 hljs-doctag: c678dd
 hljs-keyword: c678dd
 hljs-formula: c678dd
@@ -167,7 +174,19 @@ hljs-emphasis: italic
 hljs-strong: bold
 
 BLOCKQUOTE
-foreground: 5c6370
+foreground: 6e7686
 
 STRIKE
-strike-color: 586e75
+foreground: e57373
+font-style: strikeout
+
+FRONTMATTER
+foreground: 6e7686
+
+INLINEEQUATION
+foreground: 4db6ac
+font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New
+
+DISPLAYFORMULA
+foreground: 4db6ac
+font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New

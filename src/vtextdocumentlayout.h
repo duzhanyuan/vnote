@@ -4,13 +4,19 @@
 #include <QAbstractTextDocumentLayout>
 #include <QVector>
 #include <QSize>
-#include <QSet>
+#include <QMap>
+
 #include "vconstants.h"
 
 class VImageResourceManager2;
 struct VPreviewedImageInfo;
 struct VPreviewInfo;
 
+struct QMapDummyValue
+{
+};
+
+typedef QMap<int, QMapDummyValue> OrderedIntSet;
 
 class VTextDocumentLayout : public QAbstractTextDocumentLayout
 {
@@ -51,7 +57,7 @@ public:
     void relayout();
 
     // Relayout @p_blocks.
-    void relayout(const QSet<int> &p_blocks);
+    void relayout(const OrderedIntSet &p_blocks);
 
     void setImageLineColor(const QColor &p_color);
 
@@ -93,9 +99,17 @@ private:
         // Name of the image.
         QString m_name;
 
-        bool isValid()
+        // Forced background.
+        QColor m_background;
+
+        bool isValid() const
         {
             return !m_name.isEmpty();
+        }
+
+        bool hasForcedBackground() const
+        {
+            return m_background.isValid();
         }
     };
 
@@ -370,5 +384,15 @@ inline void VTextDocumentLayout::setCursorLineBlockNumber(int p_blockNumber)
             updateBlockByNumber(m_cursorLineBlockNumber);
         }
     }
+}
+
+inline void VTextDocumentLayout::setCursorWidth(int p_width)
+{
+    m_cursorWidth = p_width;
+}
+
+inline int VTextDocumentLayout::cursorWidth() const
+{
+    return m_cursorWidth;
 }
 #endif // VTEXTDOCUMENTLAYOUT_H

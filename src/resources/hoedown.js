@@ -1,11 +1,9 @@
-var placeholder = document.getElementById('placeholder');
-
 // Use Marked to highlight code blocks in edit mode.
 marked.setOptions({
     highlight: function(code, lang) {
         if (lang) {
             if (hljs.getLanguage(lang)) {
-                return hljs.highlight(lang, code).value;
+                return hljs.highlight(lang, code, true).value;
             } else {
                 return hljs.highlightAuto(code).value;
             }
@@ -16,12 +14,18 @@ marked.setOptions({
 });
 
 var updateHtml = function(html) {
-    placeholder.innerHTML = html;
+    // There is at least one async job for MathJax.
+    asyncJobsCount = 1;
+
+    contentDiv.innerHTML = html;
 
     insertImageCaption();
+    setupImageView();
 
     var codes = document.getElementsByTagName('code');
     mermaidIdx = 0;
+    plantUMLIdx = 0;
+    graphvizIdx = 0;
     for (var i = 0; i < codes.length; ++i) {
         var code = codes[i];
         if (code.parentElement.tagName.toLowerCase() == 'pre') {
@@ -32,14 +36,38 @@ var updateHtml = function(html) {
                     --i;
                     continue;
                 }
-            } else if (VEnableFlowchart && code.classList.contains('language-flowchart')) {
+            } else if (VEnableFlowchart
+                       && (code.classList.contains('language-flowchart')
+                           || code.classList.contains('language-flow'))) {
                 // Flowchart code block.
                 if (renderFlowchartOne(code)) {
                     // replaceChild() will decrease codes.length.
                     --i;
                     continue;
                 }
+            } else if (VEnableMathjax && code.classList.contains('language-mathjax')) {
+                // Mathjax code block.
+                continue;
+            } else if (VPlantUMLMode != 0
+                       && code.classList.contains('language-puml')) {
+                // PlantUML code block.
+                if (VPlantUMLMode == 1) {
+                    if (renderPlantUMLOneOnline(code)) {
+                        // replaceChild() will decrease codes.length.
+                        --i;
+                    }
+                } else {
+                    renderPlantUMLOneLocal(code);
+                }
+
+                continue;
+            } else if (VEnableGraphviz
+                       && code.classList.contains('language-dot')) {
+                // Graphviz code block.
+                renderGraphvizOneLocal(code);
+                continue;
             }
+
 
             if (listContainsRegex(code.classList, /language-.*/)) {
                 hljs.highlightBlock(code);
@@ -55,13 +83,13 @@ var updateHtml = function(html) {
     // MathJax may be not loaded for now.
     if (VEnableMathjax && (typeof MathJax != "undefined")) {
         try {
-            MathJax.Hub.Queue(["Typeset", MathJax.Hub, placeholder, finishLogics]);
+            MathJax.Hub.Queue(["Typeset", MathJax.Hub, contentDiv, postProcessMathJax]);
         } catch (err) {
             content.setLog("err: " + err);
-            finishLogics();
+            finishOneAsyncJob();
         }
     } else {
-        finishLogics();
+        finishOneAsyncJob();
     }
 };
 
@@ -70,14 +98,14 @@ var highlightText = function(text, id, timeStamp) {
     content.highlightTextCB(html, id, timeStamp);
 }
 
-var textToHtml = function(text) {
+var textToHtml = function(identifier, id, timeStamp, text, inlineStyle) {
     var html = marked(text);
-    var container = document.getElementById('text-to-html-div');
-    container.innerHTML = html;
+    if (inlineStyle) {
+        var container = textHtmlDiv;
+        container.innerHTML = html;
+        html = getHtmlWithInlineStyles(container);
+        container.innerHTML = "";
+    }
 
-    html = getHtmlWithInlineStyles(container);
-
-    container.innerHTML = "";
-
-    content.textToHtmlCB(text, html);
+    content.textToHtmlCB(identifier, id, timeStamp, html);
 }

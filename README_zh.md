@@ -1,6 +1,12 @@
 # VNote
 [英文 English](./README.md)
 
+[VNote主页](https://tamlok.github.io/vnote)
+
+[文档](http://vnote.readthedocs.io/en/latest/)
+
+[使用截图](https://tamlok.github.io/vnote/gallery.html)
+
 **VNote** 是一个受Vim启发开发的专门为 **Markdown** 而优化、设计的笔记软件。VNote是一个更了解程序员和Markdown的笔记软件。
 
 ![VNote](screenshots/vnote.png)
@@ -39,11 +45,28 @@ sudo zypper in vnote
 
 由于 Leap 42 及以下版本的 Qt 版本过低，我们无法在 OBS 上进行打包。请使用 AppImage 或自行构建。
 
+### Arch Linux
+Arch Linux可以通过AUR中的 [vnote](https://aur.archlinux.org/packages/vnote/) 进行安装：
+
+```shell
+git clone https://aur.archlinux.org/vnote.git
+cd vnote
+makepkg -sic
+```
+
+AUR也提供一个和最新master分支同步的开发版本 [vnote-git](https://aur.archlinux.org/packages/vnote-git/) 。
+
 ## MacOS
 [![Build Status](https://travis-ci.org/tamlok/vnote.svg?branch=master)](https://travis-ci.org/tamlok/vnote)
 
 - [Github releases](https://github.com/tamlok/vnote/releases)
 - master分支的最新构建：[ ![Download](https://api.bintray.com/packages/tamlok/vnote/vnote/images/download.svg) ](https://bintray.com/tamlok/vnote/vnote/_latestVersion)
+
+也可以通过 homebrew cask 进行安装：
+
+```shell
+brew cask install vnote
+```
 
 # 简介
 
@@ -51,29 +74,48 @@ sudo zypper in vnote
 
 VNote不是一个简单的Markdown编辑器。通过提供笔记管理功能，VNote使得编写Markdown笔记更简单和舒适！
 
-基于Qt框架，VNote能够在主流操作系统上运行，包括 **Linux**, **Windows** 以及 **macOS**（由于macOS上很不一样的交互逻辑，VNote在macOS上并没有被充分测试，我们也希望得到更多的反馈以帮助改进VNote）。
+基于Qt框架，VNote能够在主流操作系统上运行，包括 **Linux**, **Windows** 以及 **macOS** 。
 
-![VNote](screenshots/_vnote_1513485003_1746530034.png)
+![VNote Main Interface](screenshots/_vnotemaini_1525154456_1561295841.png)
 
 # 支持
 - [Github issues](https://github.com/tamlok/vnote/issues)；
 - 邮箱: tamlokveer at gmail.com；
-- QQ群: 487756074；
 - 微信公众号: VNote笔记（vnote_md）；  
 ![VNote WeChat](screenshots/vnote_md.jpg)
 
 # 亮点
-- 支持直接从剪切板插入图片；
-- 支持编辑和阅读模式下代码块的语法高亮；
-- 支持编辑和阅读模式下的大纲；
-- 支持自定义编辑和阅读模式的样式；
-- 支持Vim模式以及一系列强大的快捷键；
-- 支持无限层级的文件夹；
-- 支持多个标签页和窗口分割；
-- 支持[Mermaid](http://knsv.github.io/mermaid/), [Flowchart.js](http://flowchart.js.org/) 和 [MathJax](https://www.mathjax.org/)；
+- 强大的**全文搜索**；
+- **通用入口**，通过按键操控一切；
+- 直接从剪切板插入图片；
+- 编辑和阅读模式下代码块的语法高亮；
+- 强大的**原地预览**，包括图片、图表和公式；
+- 针对图表的两边实时预览；
+- 编辑和阅读模式下的大纲；
+- 自定义编辑和阅读模式的样式；
+- Vim模式以及一系列强大的快捷键；
+- 无限层级的文件夹；
+- 多个标签页和窗口分割；
+- [Mermaid](http://knsv.github.io/mermaid/)、 [Flowchart.js](http://flowchart.js.org/)、 [MathJax](https://www.mathjax.org/)、 [PlantUML](http://plantuml.com/) 和 [Graphviz](http://www.graphviz.org/)；
 - 支持高分辨率；
-- 支持笔记附件。
-- 支持主题以及深色模式;
+- 笔记附件；
+- 主题以及深色模式；
+- 丰富、可扩展的导出，包括HTML、PDF、PDF（多合一）和图片；
+
+# 捐赠
+您可以通过很多途径帮助VNote的开发。
+
+- 持续关注VNote并反馈。
+- 向您的朋友们推广和传播VNote。普及度是驱动开发者的一股强大力量。
+- 参与到VNote的开发中，发送PullRequest来帮助VNote变得更完美。
+- 最后，如果您觉得VNote真的帮助到您并且想回馈VNote，非常感谢您的捐赠。
+    - PayPal: [PayPal.Me/vnotemd](https://www.paypal.me/vnotemd)
+    - 支付宝: `tamlokveer@gmail.com`  
+    ![Alipay](screenshots/alipay.png)
+    - 微信  
+    ![WeChat Pay](screenshots/wechat_pay.png)
+
+非常感谢这些对VNote的 [捐赠者](https://github.com/tamlok/vnote/wiki/Donate-List) !
 
 # 开发VNote的动机
 ## Markdown编辑器与笔记管理
@@ -112,17 +154,24 @@ VNote还支持Markdown编辑模式中代码块的语法高亮。目前的Markdow
 
 ![Syntax Highlight](screenshots/_1513485266_1616037517.png)
 
-## 实时图片预览
-VNote支持在编辑时原地预览图片链接。这样一来，您就能尽可能地留在编辑模式，避免频繁切换。
+## 原地预览
+VNote支持在编辑时原地预览图片、图表和公式。
 
-如果想要拷贝图片，可以选取该图片，然后复制。
-
-![Live Image Preview](screenshots/_1513485934_140085443.png)
+![In-Place Preview](screenshots/_inplacepre_1525155248_405615820.png)
 
 ## 良好的图片体验
 编辑时，支持像其他富文本编辑器一样直接粘贴插入图片，VNote会帮您管理所插入的图片。VNote将这些图片保存在和笔记同一目录下的一个指定目录中。插入图片时，VNote会弹出一个窗口预览即将要插入的图片。另外，当您移除笔记中的图片链接时，VNote会自动删除对应的图片文件。
 
-![](screenshots/_1513485753_394180887.png)
+![Pleasant Image Experience](screenshots/_1513485753_394180887.png)
+
+## 通用入口和全文搜索
+VNote内置强大的全文搜索，支持**正则表达式**和**模糊搜索**。搜索可以指定范围，包括全部笔记本、当前笔记本和当前文件夹，也可以指定目标，如名字或内容。
+
+![Full-Text Search](screenshots/_1522894671_1711734243.png)
+
+类似于Vim中的`CtrlP`，VNote支持**通用入口**，可以在一个输入框中进行搜索或跳转。
+
+![Universal Entry](screenshots/_universale_1522894821_465772669.png)
 
 ## 编辑和阅读模式中的交互式大纲视图
 VNote为编辑和预览模式都提供了一个用户友好的大纲视图。该大纲视图是一个项目树，而不是简单地插入一段HTML。
@@ -135,80 +184,6 @@ VNote提供很多快捷键，从而提供一个愉悦的编辑体验。其中包
 ## 高度可定制
 VNote中，几乎一切都是可以定制的，例如背景颜色、字体以及Markdown样式等。VNote使用一个纯文本文件来记录您的所有配置，因此通过拷贝该文件就能够很快地在另一台电脑上初始化一个新的VNote。
 
-## 其他
-VNote还支持其他很多的功能，比如：
-
-- 高亮当前行；
-- 高亮所选择的文本；
-- 强大的页内查找；
-- 自动缩进和自动列表；
-
-# 构建与开发
-VNote需要5.9.1版本以上的Qt进行构建。
-
-1. 克隆代码仓库
-    ```
-    git clone https://github.com/tamlok/vnote.git vnote.git
-    cd vnote.git
-    git submodule update --init
-    ```
-2. 下载Qt  
-下载[Qt 5.9.1](http://info.qt.io/download-qt-for-application-development)，导入`VNote.pro`创建一个工程。
-
-## Linux
-如果您的Linux发行版不提供5.9.1以上版本的Qt，那么您需要从其他来源获取Qt。在Ubuntu中，您可以执行以下步骤：
-
-```
-sudo add-apt-repository ppa:beineri/opt-qt591-trusty -y
-sudo apt-get update -qq
-sudo apt-get -y install qt59base qt59webengine qt59webchannel qt59svg qt59location qt59tools qt59translations
-source /opt/qt*/bin/qt*-env.sh
-```
-
-当Qt和相关的模块准备就绪后，您可以执行以下命令来编译和安装：
-
-```
-cd vnote.git
-mkdir build
-cd build
-qmake ../VNote.pro
-make
-sudo make install
-```
-
-更多细节，您可以参考源代码根目录下的 [.travis_linux.sh](.travis_linux.sh) 。
-
-## MacOS
-在macOS下，您可以执行以下步骤来编译：
-
-1. 安装Xcode和Homebrew：
-2. 通过Homebrew安装Qt5.9.1：
-
-    ```
-    brew install qt@5.9.1
-    ```
-3. 在VNote源码根目录下，新建一个文件`build_macos.sh`：
-
-    ```sh
-    QTDIR="/usr/local/opt/qt@5.9.1"
-    PATH="$QTDIR/bin:$PATH"
-    LDFLAGS=-L$QTDIR/lib
-    CPPFLAGS=-I$QTDIR/include
-
-    mkdir -p build
-    cd build
-    qmake -v
-    qmake CONFIG-=debug CONFIG+=release ../VNote.pro
-    make -j2
-    ```
-4. 修改`build_macos.sh`的执行权限，并执行：
-
-    ```sh
-    chmod +x build_macos.sh
-    ./build_macos.sh
-    ```
-5. 此时得到VNote的Bundle `path/to/project/build/src/VNote.app`，打开即可。
-
 # 依赖
 - [Qt 5.9](http://qt-project.org) (L-GPL v3)
 - [PEG Markdown Highlight](http://hasseg.org/peg-markdown-highlight/) (MIT License)
@@ -219,10 +194,19 @@ sudo make install
 - [markdown-it 8.3.1](https://github.com/markdown-it/markdown-it) (MIT License)
 - [markdown-it-headinganchor 1.3.0](https://github.com/adam-p/markdown-it-headinganchor) (MIT License)
 - [markdown-it-task-lists 1.4.0](https://github.com/revin/markdown-it-task-lists) (ISC License)
+- [markdown-it-footnote](https://github.com/markdown-it/markdown-it-footnote) (MIT License)
+- [markdown-it-sub](https://github.com/markdown-it/markdown-it-sub) (MIT License)
+- [markdown-it-sup](https://github.com/markdown-it/markdown-it-sup) (MIT License)
+- [markdown-it-front-matter](https://github.com/craigdmckenna/markdown-it-front-matter) (MIT License)
+- [markdown-it-imsize](https://github.com/tatsy/markdown-it-imsize) (Unknown) (Thanks @Kinka for help)
+- [markdown-it-emoji](https://github.com/markdown-it/markdown-it-emoji) (MIT License)
+- [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath) (MIT License)
 - [mermaid 7.0.0](https://github.com/knsv/mermaid) (MIT License)
 - [MathJax](https://www.mathjax.org/) (Apache-2.0)
 - [showdown](https://github.com/showdownjs/showdown) (Unknown)
 - [flowchart.js](https://github.com/adrai/flowchart.js) (MIT License)
+- [PlantUML](http://plantuml.com/) (MIT License)
+- [dom-to-image](https://github.com/tsayen/dom-to-image) (MIT License)
 
 # 代码许可
 VNote使用[MIT许可](http://opensource.org/licenses/MIT)。

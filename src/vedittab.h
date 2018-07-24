@@ -8,6 +8,7 @@
 #include "vfile.h"
 #include "utils/vvim.h"
 #include "vedittabinfo.h"
+#include "vwordcountinfo.h"
 
 class VEditArea;
 class VSnippet;
@@ -27,7 +28,8 @@ public:
     virtual bool closeFile(bool p_forced) = 0;
 
     // Enter read mode.
-    virtual void readFile() = 0;
+    // @p_discard: whether set the discard action as the default one.
+    virtual void readFile(bool p_discard = false) = 0;
 
     // Save file.
     virtual bool saveFile() = 0;
@@ -114,9 +116,28 @@ public:
     // Handle the change of file or directory, such as the file has been moved.
     virtual void handleFileOrDirectoryChange(bool p_isFile, UpdateAction p_act);
 
+    // Fetch tab stat info.
+    virtual VWordCountInfo fetchWordCountInfo(bool p_editMode) const;
+
+    virtual void toggleLivePreview()
+    {
+    }
+
 public slots:
     // Enter edit mode
     virtual void editFile() = 0;
+
+    virtual void handleVimCmdCommandCancelled();
+
+    virtual void handleVimCmdCommandFinished(VVim::CommandLineType p_type, const QString &p_cmd);
+
+    virtual void handleVimCmdCommandChanged(VVim::CommandLineType p_type, const QString &p_cmd);
+
+    virtual QString handleVimCmdRequestNextCommand(VVim::CommandLineType p_type, const QString &p_cmd);
+
+    virtual QString handleVimCmdRequestPreviousCommand(VVim::CommandLineType p_type, const QString &p_cmd);
+
+    virtual QString handleVimCmdRequestRegister(int p_key, int p_modifiers);
 
 protected:
     void wheelEvent(QWheelEvent *p_event) Q_DECL_OVERRIDE;
@@ -179,6 +200,9 @@ signals:
 
     // Request to close itself.
     void closeRequested(VEditTab *p_tab);
+
+    // Request main window to show Vim cmd line.
+    void triggerVimCmd(VVim::CommandLineType p_type);
 
 private slots:
     // Called when app focus changed.

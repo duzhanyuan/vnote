@@ -3,17 +3,21 @@
 
 #include <QString>
 #include <QPointer>
+#include <QSharedPointer>
 #include "vedittab.h"
 #include "vconstants.h"
 #include "vmarkdownconverter.h"
 #include "vconfigmanager.h"
 
 class VWebView;
-class QStackedLayout;
 class VDocument;
 class VMdEditor;
 class VInsertSelector;
 class QTimer;
+class QWebEngineDownloadItem;
+class QSplitter;
+class VLivePreviewHelper;
+class VMathJaxInplacePreviewHelper;
 
 class VMdTab : public VEditTab
 {
@@ -28,7 +32,7 @@ public:
 
     // Enter read mode.
     // Will prompt user to save the changes.
-    void readFile() Q_DECL_OVERRIDE;
+    void readFile(bool p_discard = false) Q_DECL_OVERRIDE;
 
     // Save file.
     bool saveFile() Q_DECL_OVERRIDE;
@@ -87,9 +91,27 @@ public:
 
     void handleFileOrDirectoryChange(bool p_isFile, UpdateAction p_act) Q_DECL_OVERRIDE;
 
+    // Fetch tab stat info.
+    VWordCountInfo fetchWordCountInfo(bool p_editMode) const Q_DECL_OVERRIDE;
+
+    // Toggle live preview in edit mode.
+    void toggleLivePreview() Q_DECL_OVERRIDE;
+
 public slots:
     // Enter edit mode.
     void editFile() Q_DECL_OVERRIDE;
+
+    void handleVimCmdCommandCancelled() Q_DECL_OVERRIDE;
+
+    void handleVimCmdCommandFinished(VVim::CommandLineType p_type, const QString &p_cmd) Q_DECL_OVERRIDE;
+
+    void handleVimCmdCommandChanged(VVim::CommandLineType p_type, const QString &p_cmd) Q_DECL_OVERRIDE;
+
+    QString handleVimCmdRequestNextCommand(VVim::CommandLineType p_type, const QString &p_cmd) Q_DECL_OVERRIDE;
+
+    QString handleVimCmdRequestPreviousCommand(VVim::CommandLineType p_type, const QString &p_cmd) Q_DECL_OVERRIDE;
+
+    QString handleVimCmdRequestRegister(int p_key, int p_modifiers) Q_DECL_OVERRIDE;
 
 protected:
     void writeBackupFile() Q_DECL_OVERRIDE;
@@ -109,7 +131,7 @@ private slots:
     void updateCurrentHeader(int p_blockNumber);
 
     // Handle key press event in Web view.
-    void handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift);
+    void handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift, bool p_meta);
 
     // m_editor requests to save changes and enter read mode.
     void saveAndRead();
@@ -120,8 +142,21 @@ private slots:
     // Restore from m_infoToRestore.
     void restoreFromTabInfo();
 
+    // Handle download request from web page.
+    void handleDownloadRequested(QWebEngineDownloadItem *p_item);
+
+    // Handle save page request.
+    void handleSavePageRequested();
+
 private:
     enum TabReady { None = 0, ReadMode = 0x1, EditMode = 0x2 };
+
+    enum Mode { InvalidMode = 0, Read, Edit, EditPreview };
+
+    struct WebViewState
+    {
+        qreal m_zoomFactor;
+    };
 
     // Setup UI.
     void setupUI();
@@ -184,7 +219,14 @@ private:
     // updateStatus() with only cursor position information.
     void updateCursorStatus();
 
-    void textToHtmlViaWebView(const QString &p_text);
+    void textToHtmlViaWebView(const QString &p_text, int p_id, int p_timeStamp);
+
+    bool executeVimCommandInWebView(const QString &p_cmd);
+
+    // Update web view by current content.
+    void updateWebView();
+
+    void setCurrentMode(Mode p_mode);
 
     VMdEditor *m_editor;
     VWebView *m_webViewer;
@@ -194,7 +236,7 @@ private:
     // Whether heading sequence is enabled.
     bool m_enableHeadingSequence;
 
-    QStackedLayout *m_stacks;
+    QSplitter *m_splitter;
 
     // Timer to write backup file when content has been changed.
     QTimer *m_backupTimer;
@@ -203,6 +245,18 @@ private:
 
     // Used to scroll to the header of edit mode in read mode.
     VHeaderPointer m_headerFromEditMode;
+
+    VVim::SearchItem m_lastSearchItem;
+
+    Mode m_mode;
+
+    QSharedPointer<WebViewState> m_readWebViewState;
+    QSharedPointer<WebViewState> m_previewWebViewState;
+
+    VLivePreviewHelper *m_livePreviewHelper;
+    VMathJaxInplacePreviewHelper *m_mathjaxPreviewHelper;
+
+    int m_documentID;
 };
 
 inline VMdEditor *VMdTab::getEditor()

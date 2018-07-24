@@ -1,6 +1,9 @@
 #include "vnotebook.h"
 #include <QDir>
 #include <QDebug>
+#include <QCoreApplication>
+#include <QJsonArray>
+
 #include "vdirectory.h"
 #include "utils/vutils.h"
 #include "vconfigmanager.h"
@@ -11,17 +14,27 @@ extern VConfigManager *g_config;
 VNotebook::VNotebook(const QString &name, const QString &path, QObject *parent)
     : QObject(parent), m_name(name), m_valid(false)
 {
-    m_path = QDir::cleanPath(path);
+    setPath(path);
     m_recycleBinFolder = g_config->getRecycleBinFolder();
     m_rootDir = new VDirectory(this,
                                NULL,
-                               VUtils::directoryNameFromPath(path),
+                               VUtils::directoryNameFromPath(m_path),
                                QDateTime::currentDateTimeUtc());
 }
 
 VNotebook::~VNotebook()
 {
     delete m_rootDir;
+}
+
+void VNotebook::setPath(const QString &p_path)
+{
+    m_pathInConfig = QDir::cleanPath(p_path);
+    if (QDir::isAbsolutePath(m_pathInConfig)) {
+        m_path = m_pathInConfig;
+    } else {
+        m_path = QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(m_pathInConfig));
+    }
 }
 
 bool VNotebook::readConfigNotebook()
@@ -43,6 +56,12 @@ bool VNotebook::readConfigNotebook()
     it = configJson.find(DirConfig::c_recycleBinFolder);
     if (it != configJson.end()) {
         m_recycleBinFolder = it.value().toString();
+    }
+
+    // [tags] section.
+    QJsonArray tagsJson = configJson[DirConfig::c_tags].toArray();
+    for (int i = 0; i < tagsJson.size(); ++i) {
+        m_tags.append(tagsJson[i].toString());
     }
 
     // [attachment_folder] section.
@@ -75,6 +94,14 @@ QJsonObject VNotebook::toConfigJsonNotebook() const
 
     // [recycle_bin_folder] section.
     json[DirConfig::c_recycleBinFolder] = m_recycleBinFolder;
+
+    // [tags] section.
+    QJsonArray tags;
+    for (auto const & tag : m_tags) {
+        tags.append(tag);
+    }
+
+    json[DirConfig::c_tags] = tags;
 
     return json;
 }
@@ -115,16 +142,6 @@ bool VNotebook::writeConfigNotebook() const
     return VConfigManager::writeDirectoryConfig(m_path, configJson);
 }
 
-const QString &VNotebook::getName() const
-{
-    return m_name;
-}
-
-const QString &VNotebook::getPath() const
-{
-    return m_path;
-}
-
 void VNotebook::close()
 {
     m_rootDir->close();
@@ -132,6 +149,10 @@ void VNotebook::close()
 
 bool VNotebook::open()
 {
+    if (!m_valid) {
+        return false;
+    }
+
     QString recycleBinPath = getRecycleBinFolderPath();
     if (!QFileInfo::exists(recycleBinPath)) {
         QDir dir(m_path);
@@ -167,17 +188,19 @@ VNotebook *VNotebook::createNotebook(const QString &p_name,
     nb->setAttachmentFolder(attachmentFolder);
 
     // Check if there alread exists a config file.
-    if (p_import && VConfigManager::directoryConfigExist(p_path)) {
+    if (p_import && VConfigManager::directoryConfigExist(nb->getPath())) {
         qDebug() << "import existing notebook";
         nb->readConfigNotebook();
         return nb;
     }
 
-    VUtils::makePath(p_path);
+    VUtils::makePath(nb->getPath());
 
     if (!nb->writeToConfig()) {
         delete nb;
         return NULL;
+    } else {
+        nb->m_valid = true;
     }
 
     return nb;
@@ -365,5 +388,72 @@ QString VNotebook::getRecycleBinFolderPath() const
         return m_recycleBinFolder;
     } else {
         return QDir(m_path).filePath(m_recycleBinFolder);
+    }
+}
+
+QList<QString> VNotebook::collectFiles()
+{
+    QList<QString> files;
+
+    bool opened = isOpened();
+    if (!opened && !open()) {
+        qWarning() << "fail to open notebook %1" << m_path;
+        return files;
+    }
+
+    files = m_rootDir->collectFiles();
+
+    if (!opened) {
+        close();
+    }
+
+    return files;
+}
+
+void VNotebook::updatePath(const QString &p_path)
+{
+    Q_ASSERT(!isOpened());
+    m_valid = false;
+    setPath(p_path);
+    delete m_rootDir;
+    m_rootDir = new VDirectory(this,
+                               NULL,
+                               VUtils::directoryNameFromPath(m_path),
+                               QDateTime::currentDateTimeUtc());
+
+    readConfigNotebook();
+}
+
+bool VNotebook::addTag(const QString &p_tag)
+{
+    Q_ASSERT(isOpened());
+
+    if (p_tag.isEmpty() || hasTag(p_tag)) {
+        return false;
+    }
+
+    m_tags.append(p_tag);
+    if (!writeConfigNotebook()) {
+        qWarning() << "fail to update config of notebook" << m_name
+                   << "in directory" << m_path;
+        m_tags.removeAll(p_tag);
+        return false;
+    }
+
+    return true;
+}
+
+void VNotebook::removeTag(const QString &p_tag)
+{
+    if (p_tag.isEmpty() || m_tags.isEmpty()) {
+        return;
+    }
+
+    int nr = m_tags.removeAll(p_tag);
+    if (nr > 0) {
+        if (!writeConfigNotebook()) {
+            qWarning() << "fail to update config of notebook" << m_name
+                       << "in directory" << m_path;
+        }
     }
 }

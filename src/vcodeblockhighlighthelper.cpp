@@ -2,10 +2,12 @@
 
 #include <QDebug>
 #include <QStringList>
+
 #include "vdocument.h"
 #include "utils/vutils.h"
+#include "pegmarkdownhighlighter.h"
 
-VCodeBlockHighlightHelper::VCodeBlockHighlightHelper(HGMarkdownHighlighter *p_highlighter,
+VCodeBlockHighlightHelper::VCodeBlockHighlightHelper(PegMarkdownHighlighter *p_highlighter,
                                                      VDocument *p_vdoc,
                                                      MarkdownConverterType p_type)
     : QObject(p_highlighter),
@@ -14,14 +16,14 @@ VCodeBlockHighlightHelper::VCodeBlockHighlightHelper(HGMarkdownHighlighter *p_hi
       m_type(p_type),
       m_timeStamp(0)
 {
-    connect(m_highlighter, &HGMarkdownHighlighter::codeBlocksUpdated,
+    connect(m_highlighter, &PegMarkdownHighlighter::codeBlocksUpdated,
             this, &VCodeBlockHighlightHelper::handleCodeBlocksUpdated);
     connect(m_vdocument, &VDocument::textHighlighted,
             this, &VCodeBlockHighlightHelper::handleTextHighlightResult);
 
     // Web side is ready for code block highlight.
     connect(m_vdocument, &VDocument::readyToHighlightText,
-            m_highlighter, &HGMarkdownHighlighter::updateHighlight);
+            m_highlighter, &PegMarkdownHighlighter::updateHighlight);
 }
 
 QString VCodeBlockHighlightHelper::unindentCodeBlock(const QString &p_text)
@@ -57,44 +59,45 @@ QString VCodeBlockHighlightHelper::unindentCodeBlock(const QString &p_text)
     return res;
 }
 
-void VCodeBlockHighlightHelper::handleCodeBlocksUpdated(const QVector<VCodeBlock> &p_codeBlocks)
+void VCodeBlockHighlightHelper::handleCodeBlocksUpdated(TimeStamp p_timeStamp,
+                                                        const QVector<VCodeBlock> &p_codeBlocks)
 {
     if (!m_vdocument->isReadyToHighlight()) {
         // Immediately return empty results.
         QVector<HLUnitPos> emptyRes;
         for (int i = 0; i < p_codeBlocks.size(); ++i) {
-            updateHighlightResults(0, emptyRes);
+            updateHighlightResults(p_timeStamp, 0, emptyRes);
         }
 
         return;
     }
 
-    int curStamp = m_timeStamp.fetchAndAddRelaxed(1) + 1;
+    m_timeStamp = p_timeStamp;
     m_codeBlocks = p_codeBlocks;
     for (int i = 0; i < m_codeBlocks.size(); ++i) {
         const VCodeBlock &block = m_codeBlocks[i];
         auto it = m_cache.find(block.m_text);
         if (it != m_cache.end()) {
             // Hit cache.
-            qDebug() << "code block highlight hit cache" << curStamp << i;
-            it.value().m_timeStamp = curStamp;
-            updateHighlightResults(block.m_startPos, it.value().m_units);
+            qDebug() << "code block highlight hit cache" << p_timeStamp << i;
+            it.value().m_timeStamp = p_timeStamp;
+            updateHighlightResults(p_timeStamp, block.m_startPos, it.value().m_units);
         } else {
             QString unindentedText = unindentCodeBlock(block.m_text);
-            m_vdocument->highlightTextAsync(unindentedText, i, curStamp);
+            m_vdocument->highlightTextAsync(unindentedText, i, p_timeStamp);
         }
     }
 }
 
 void VCodeBlockHighlightHelper::handleTextHighlightResult(const QString &p_html,
                                                           int p_id,
-                                                          int p_timeStamp)
+                                                          unsigned long long p_timeStamp)
 {
-    int curStamp = m_timeStamp.load();
     // Abandon obsolete result.
-    if (curStamp != p_timeStamp) {
+    if (m_timeStamp != p_timeStamp) {
         return;
     }
+
     parseHighlightResult(p_timeStamp, p_id, p_html);
 }
 
@@ -111,8 +114,20 @@ static void matchTokenRelaxed(const QString &p_text, const QString &p_tokenStr,
                               int &p_index, int &p_start, int &p_end)
 {
     QString regStr = QRegExp::escape(p_tokenStr);
+
+    // Remove the leading spaces.
+    int nonSpaceIdx = 0;
+    while (nonSpaceIdx < regStr.size() && regStr[nonSpaceIdx].isSpace()) {
+        ++nonSpaceIdx;
+    }
+
+    if (nonSpaceIdx > 0 && nonSpaceIdx < regStr.size()) {
+        regStr.remove(0, nonSpaceIdx);
+    }
+
     // Do not replace the ending '\n'.
     regStr.replace(QRegExp("\n(?!$)"), "\\s+");
+
     QRegExp regExp(regStr);
     p_start = p_text.indexOf(regExp, p_index);
     if (p_start == -1) {
@@ -125,7 +140,7 @@ static void matchTokenRelaxed(const QString &p_text, const QString &p_tokenStr,
 }
 
 // For now, we could only handle code blocks outside the list.
-void VCodeBlockHighlightHelper::parseHighlightResult(int p_timeStamp,
+void VCodeBlockHighlightHelper::parseHighlightResult(TimeStamp p_timeStamp,
                                                      int p_idx,
                                                      const QString &p_html)
 {
@@ -197,9 +212,8 @@ void VCodeBlockHighlightHelper::parseHighlightResult(int p_timeStamp,
 
 exit:
     // Pass result back to highlighter.
-    int curStamp = m_timeStamp.load();
     // Abandon obsolete result.
-    if (curStamp != p_timeStamp) {
+    if (m_timeStamp != p_timeStamp) {
         return;
     }
 
@@ -212,10 +226,11 @@ exit:
     // Add it to cache.
     addToHighlightCache(text, p_timeStamp, hlUnits);
 
-    updateHighlightResults(startPos, hlUnits);
+    updateHighlightResults(p_timeStamp, startPos, hlUnits);
 }
 
-void VCodeBlockHighlightHelper::updateHighlightResults(int p_startPos,
+void VCodeBlockHighlightHelper::updateHighlightResults(TimeStamp p_timeStamp,
+                                                       int p_startPos,
                                                        QVector<HLUnitPos> p_units)
 {
     for (int i = 0; i < p_units.size(); ++i) {
@@ -223,7 +238,7 @@ void VCodeBlockHighlightHelper::updateHighlightResults(int p_startPos,
     }
 
     // We need to call this function anyway to trigger the rehighlight.
-    m_highlighter->setCodeBlockHighlights(p_units);
+    m_highlighter->setCodeBlockHighlights(p_timeStamp, p_units);
 }
 
 bool VCodeBlockHighlightHelper::parseSpanElement(QXmlStreamReader &p_xml,
@@ -271,14 +286,14 @@ bool VCodeBlockHighlightHelper::parseSpanElement(QXmlStreamReader &p_xml,
 }
 
 void VCodeBlockHighlightHelper::addToHighlightCache(const QString &p_text,
-                                                    int p_timeStamp,
+                                                    TimeStamp p_timeStamp,
                                                     const QVector<HLUnitPos> &p_units)
 {
     const int c_maxEntries = 100;
-    const int c_maxTimeStampSpan = 3;
+    const TimeStamp c_maxTimeStampSpan = 3;
     if (m_cache.size() >= c_maxEntries) {
         // Remove the oldest one.
-        int ts = p_timeStamp - c_maxTimeStampSpan;
+        TimeStamp ts = p_timeStamp - c_maxTimeStampSpan;
         for (auto it = m_cache.begin(); it != m_cache.end();) {
             if (it.value().m_timeStamp < ts) {
                 it = m_cache.erase(it);

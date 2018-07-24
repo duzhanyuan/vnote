@@ -1,5 +1,7 @@
-#include <QtWidgets>
 #include "veditarea.h"
+
+#include <QtWidgets>
+
 #include "veditwindow.h"
 #include "vedittab.h"
 #include "vnote.h"
@@ -11,6 +13,7 @@
 #include "vmainwindow.h"
 #include "vcaptain.h"
 #include "vfilelist.h"
+#include "vmathjaxpreviewhelper.h"
 
 extern VConfigManager *g_config;
 
@@ -29,7 +32,6 @@ VEditArea::VEditArea(QWidget *parent)
     setCurrentWindow(0, false);
 
     registerCaptainTargets();
-
 
     QString keySeq = g_config->getShortcutKeySequence("ActivateNextTab");
     qDebug() << "set ActivateNextTab shortcut to" << keySeq;
@@ -62,6 +64,10 @@ VEditArea::VEditArea(QWidget *parent)
             this, &VEditArea::handleFileTimerTimeout);
 
     timer->start();
+
+    m_autoSave = g_config->getEnableAutoSave();
+
+    m_mathPreviewHelper = new VMathJaxPreviewHelper(this, this);
 }
 
 void VEditArea::setupUI()
@@ -183,6 +189,9 @@ VEditTab *VEditArea::openFile(VFile *p_file, OpenFileMode p_mode, bool p_forceMo
     if (!p_file) {
         return NULL;
     }
+
+    // Update auto save settings.
+    m_autoSave = g_config->getEnableAutoSave();
 
     // If it is DocType::Unknown, open it using system default method.
     if (p_file->getDocType() == DocType::Unknown) {
@@ -403,10 +412,10 @@ void VEditArea::saveFile()
     win->saveFile();
 }
 
-void VEditArea::readFile()
+void VEditArea::readFile(bool p_discard)
 {
     VEditWindow *win = getWindow(curWindowIndex);
-    win->readFile();
+    win->readFile(p_discard);
 }
 
 void VEditArea::saveAndReadFile()
@@ -434,6 +443,8 @@ void VEditArea::splitWindow(VEditWindow *p_window, bool p_right)
 
     insertSplitWindow(idx);
     setCurrentWindow(idx, true);
+
+    distributeSplits();
 }
 
 void VEditArea::splitCurrentWindow()
@@ -563,6 +574,20 @@ VEditTab *VEditArea::getTab(int p_winIdx, int p_tabIdx) const
     }
 
     return win->getTab(p_tabIdx);
+}
+
+VEditTab *VEditArea::getTab(const VFile *p_file) const
+{
+    int nrWin = splitter->count();
+    for (int winIdx = 0; winIdx < nrWin; ++winIdx) {
+        VEditWindow *win = getWindow(winIdx);
+        int tabIdx = win->findTabByFile(p_file);
+        if (tabIdx != -1) {
+            return win->getTab(tabIdx);
+        }
+    }
+
+    return NULL;
 }
 
 QVector<VEditTabInfo> VEditArea::getAllTabsInfo() const
@@ -724,23 +749,28 @@ void VEditArea::showNavigation()
     for (auto label : m_naviLabels) {
         delete label;
     }
+
     m_naviLabels.clear();
 
     if (!isVisible()) {
         return;
     }
 
-    // Generate labels for VEditWindow.
-    for (int i = 0; i < 26 && i < splitter->count(); ++i) {
-        QChar key('a' + i);
-        m_keyMap[key] = getWindow(i);
-
-        QString str = QString(m_majorKey) + key;
-        QLabel *label = new QLabel(str, this);
-        label->setStyleSheet(g_vnote->getNavigationLabelStyle(str));
-        label->move(getWindow(i)->geometry().topLeft());
-        label->show();
-        m_naviLabels.append(label);
+    // Generate labels for VEDitTab.
+    int charIdx = 0;
+    for (int i = 0; charIdx < 26 && i < splitter->count(); ++i) {
+        VEditWindow *win = getWindow(i);
+        QVector<TabNavigationInfo> tabInfos = win->getTabsNavigationInfo();
+        for (int j = 0; charIdx < 26 && j < tabInfos.size(); ++j, ++charIdx) {
+            QChar key('a' + charIdx);
+            m_keyMap[key] = tabInfos[j].m_tab;
+            QString str = QString(m_majorKey) + key;
+            QLabel *label = new QLabel(str, win);
+            label->setStyleSheet(g_vnote->getNavigationLabelStyle(str));
+            label->show();
+            label->move(tabInfos[j].m_topLeft);
+            m_naviLabels.append(label);
+        }
     }
 }
 
@@ -750,6 +780,7 @@ void VEditArea::hideNavigation()
     for (auto label : m_naviLabels) {
         delete label;
     }
+
     m_naviLabels.clear();
 }
 
@@ -762,11 +793,10 @@ bool VEditArea::handleKeyNavigation(int p_key, bool &p_succeed)
     if (secondKey && !keyChar.isNull()) {
         secondKey = false;
         p_succeed = true;
-        ret = true;
         auto it = m_keyMap.find(keyChar);
         if (it != m_keyMap.end()) {
-            setCurrentWindow(splitter->indexOf(static_cast<VEditWindow *>(it.value())),
-                                               true);
+            ret = true;
+            static_cast<VEditTab *>(it.value())->focusTab();
         }
     } else if (keyChar == m_majorKey) {
         // Major key pressed.
@@ -778,11 +808,13 @@ bool VEditArea::handleKeyNavigation(int p_key, bool &p_succeed)
         }
         ret = true;
     }
+
     return ret;
 }
 
-int VEditArea::openFiles(const QVector<VFileSessionInfo> &p_files)
+int VEditArea::openFiles(const QVector<VFileSessionInfo> &p_files, bool p_oneByOne)
 {
+    VFile *curFile = NULL;
     int nrOpened = 0;
     for (auto const & info : p_files) {
         QString filePath = VUtils::validFilePathToOpen(info.m_file);
@@ -798,11 +830,23 @@ int VEditArea::openFiles(const QVector<VFileSessionInfo> &p_files)
         VEditTab *tab = openFile(file, info.m_mode, true);
         ++nrOpened;
 
+        if (info.m_active) {
+            curFile = file;
+        }
+
         VEditTabInfo tabInfo;
         tabInfo.m_editTab = tab;
         info.toEditTabInfo(&tabInfo);
 
         tab->tryRestoreFromTabInfo(tabInfo);
+
+        if (p_oneByOne) {
+            QCoreApplication::sendPostedEvents();
+        }
+    }
+
+    if (curFile) {
+        openFile(curFile, OpenFileMode::Read, false);
     }
 
     return nrOpened;
@@ -890,6 +934,14 @@ void VEditArea::registerCaptainTargets()
                                    g_config->getCaptainShortcutKeySequence("RemoveSplit"),
                                    this,
                                    removeSplitByCaptain);
+    captain->registerCaptainTarget(tr("MaximizeSplit"),
+                                   g_config->getCaptainShortcutKeySequence("MaximizeSplit"),
+                                   this,
+                                   maximizeSplitByCaptain);
+    captain->registerCaptainTarget(tr("DistributeSplits"),
+                                   g_config->getCaptainShortcutKeySequence("DistributeSplits"),
+                                   this,
+                                   distributeSplitsByCaptain);
     captain->registerCaptainTarget(tr("MagicWord"),
                                    g_config->getCaptainShortcutKeySequence("MagicWord"),
                                    this,
@@ -898,6 +950,10 @@ void VEditArea::registerCaptainTargets()
                                    g_config->getCaptainShortcutKeySequence("ApplySnippet"),
                                    this,
                                    applySnippetByCaptain);
+    captain->registerCaptainTarget(tr("LivePreview"),
+                                   g_config->getCaptainShortcutKeySequence("LivePreview"),
+                                   this,
+                                   toggleLivePreviewByCaptain);
 }
 
 bool VEditArea::activateTabByCaptain(void *p_target, void *p_data, int p_idx)
@@ -987,6 +1043,7 @@ bool VEditArea::activateNextTabByCaptain(void *p_target, void *p_data)
     VEditWindow *win = obj->getCurrentWindow();
     if (win) {
         win->focusNextTab(true);
+        return false;
     }
 
     return true;
@@ -1029,6 +1086,24 @@ bool VEditArea::removeSplitByCaptain(void *p_target, void *p_data)
     return false;
 }
 
+bool VEditArea::maximizeSplitByCaptain(void *p_target, void *p_data)
+{
+    Q_UNUSED(p_data);
+    VEditArea *obj = static_cast<VEditArea *>(p_target);
+
+    obj->maximizeCurrentSplit();
+    return true;
+}
+
+bool VEditArea::distributeSplitsByCaptain(void *p_target, void *p_data)
+{
+    Q_UNUSED(p_data);
+    VEditArea *obj = static_cast<VEditArea *>(p_target);
+
+    obj->distributeSplits();
+    return true;
+}
+
 bool VEditArea::evaluateMagicWordsByCaptain(void *p_target, void *p_data)
 {
     VEditArea *obj = static_cast<VEditArea *>(p_target);
@@ -1059,6 +1134,19 @@ bool VEditArea::applySnippetByCaptain(void *p_target, void *p_data)
     return true;
 }
 
+bool VEditArea::toggleLivePreviewByCaptain(void *p_target, void *p_data)
+{
+    Q_UNUSED(p_data);
+    VEditArea *obj = static_cast<VEditArea *>(p_target);
+
+    VEditTab *tab = obj->getCurrentTab();
+    if (tab) {
+        tab->toggleLivePreview();
+    }
+
+    return true;
+}
+
 void VEditArea::recordClosedFile(const VFileSessionInfo &p_file)
 {
     for (auto it = m_lastClosedFiles.begin(); it != m_lastClosedFiles.end(); ++it) {
@@ -1070,18 +1158,81 @@ void VEditArea::recordClosedFile(const VFileSessionInfo &p_file)
     }
 
     m_lastClosedFiles.push(p_file);
-    qDebug() << "pushed closed file" << p_file.m_file;
+
+    emit fileClosed(p_file.m_file);
 }
 
 void VEditArea::handleFileTimerTimeout()
 {
-    checkFileChangeOutside();
-}
-
-void VEditArea::checkFileChangeOutside()
-{
     int nrWin = splitter->count();
     for (int i = 0; i < nrWin; ++i) {
-        getWindow(i)->checkFileChangeOutside();
+        // Check whether opened files have been changed outside.
+        VEditWindow *win = getWindow(i);
+        win->checkFileChangeOutside();
+
+        if (m_autoSave) {
+            win->saveAll();
+        }
     }
+}
+
+QRect VEditArea::editAreaRect() const
+{
+    QRect rt = rect();
+    int nrWin = splitter->count();
+    if (nrWin > 0) {
+        rt.setTopLeft(QPoint(0, getWindow(0)->tabBarHeight()));
+    }
+
+    return rt;
+}
+
+void VEditArea::maximizeCurrentSplit()
+{
+    if (splitter->count() <= 1 || curWindowIndex == -1) {
+        return;
+    }
+
+    const int MinSplitWidth = 20 * VUtils::calculateScaleFactor();
+
+    auto sizes = splitter->sizes();
+    int totalWidth = 0;
+    for (auto sz : sizes) {
+        totalWidth += sz;
+    }
+
+    int newWidth = totalWidth - MinSplitWidth * (sizes.size() - 1);
+    if (newWidth <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < sizes.size(); ++i) {
+        sizes[i] = (i == curWindowIndex) ? newWidth : MinSplitWidth;
+    }
+
+    splitter->setSizes(sizes);
+}
+
+void VEditArea::distributeSplits()
+{
+    if (splitter->count() <= 1) {
+        return;
+    }
+
+    auto sizes = splitter->sizes();
+    int totalWidth = 0;
+    for (auto sz : sizes) {
+        totalWidth += sz;
+    }
+
+    int newWidth = totalWidth / sizes.size();
+    if (newWidth <= 0) {
+        return;
+    }
+
+    for (int i = 0; i < sizes.size(); ++i) {
+        sizes[i] = newWidth;
+    }
+
+    splitter->setSizes(sizes);
 }

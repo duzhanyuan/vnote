@@ -17,9 +17,7 @@ const QString VConfigManager::orgName = QString("vnote");
 
 const QString VConfigManager::appName = QString("vnote");
 
-const QString VConfigManager::c_version = QString("1.11.1");
-
-const QString VConfigManager::c_obsoleteDirConfigFile = QString(".vnote.json");
+const QString VConfigManager::c_version = QString("1.20");
 
 const QString VConfigManager::c_dirConfigFile = QString("_vnote.json");
 
@@ -47,8 +45,12 @@ const QString VConfigManager::c_dataTextStyle = QString("font: bold");
 
 const QString VConfigManager::c_vnoteNotebookFolderName = QString("vnote_notebooks");
 
+const QString VConfigManager::c_exportFolderName = QString("vnote_exports");
+
 VConfigManager::VConfigManager(QObject *p_parent)
     : QObject(p_parent),
+      m_noteListViewOrder(-1),
+      m_explorerCurrentIndex(-1),
       m_hasReset(false),
       userSettings(NULL),
       defaultSettings(NULL),
@@ -102,8 +104,6 @@ void VConfigManager::initialize()
     curRenderBackgroundColor = getConfigFromSettings("global",
                                                      "current_render_background_color").toString();
 
-    m_toolsDockChecked = getConfigFromSettings("global", "tools_dock_checked").toBool();
-
     m_findCaseSensitive = getConfigFromSettings("global",
                                                 "find_case_sensitive").toBool();
     m_findWholeWordOnly = getConfigFromSettings("global",
@@ -127,6 +127,8 @@ void VConfigManager::initialize()
         m_webZoomFactor = VUtils::calculateScaleFactor();
         qDebug() << "set WebZoomFactor to" << m_webZoomFactor;
     }
+
+    m_editorZoomDelta = getConfigFromSettings("global", "editor_zoom_delta").toInt();
 
     m_enableCodeBlockHighlight = getConfigFromSettings("global",
                                                        "enable_code_block_highlight").toBool();
@@ -217,14 +219,8 @@ void VConfigManager::initialize()
     m_toolBarIconSize = getConfigFromSettings("global",
                                               "tool_bar_icon_size").toInt();
 
-    m_markdownitOptHtml = getConfigFromSettings("global",
-                                                "markdownit_opt_html").toBool();
-
-    m_markdownitOptBreaks = getConfigFromSettings("global",
-                                                  "markdownit_opt_breaks").toBool();
-
-    m_markdownitOptLinkify = getConfigFromSettings("global",
-                                                   "markdownit_opt_linkify").toBool();
+    m_markdownItOpt = MarkdownitOption::fromConfig(getConfigFromSettings("web",
+                                                                         "markdownit_opt").toStringList());
 
     m_recycleBinFolder = getConfigFromSettings("global",
                                                "recycle_bin_folder").toString();
@@ -243,9 +239,6 @@ void VConfigManager::initialize()
 
     m_doubleClickCloseTab = getConfigFromSettings("global",
                                                   "double_click_close_tab").toBool();
-
-    m_enableCompactMode = getConfigFromSettings("global",
-                                                "enable_compact_mode").toBool();
 
     int tmpStartupPageMode = getConfigFromSettings("global",
                                                    "startup_page_type").toInt();
@@ -276,23 +269,43 @@ void VConfigManager::initialize()
         m_backupExtension = ".";
     }
 
-    m_enableBackupFile = getConfigFromSettings("global",
-                                               "enable_backup_file").toBool();
-
     m_vimExemptionKeys = getConfigFromSettings("global",
                                                "vim_exemption_keys").toString();
 
     m_closeBeforeExternalEditor = getConfigFromSettings("global",
                                                         "close_before_external_editor").toBool();
 
-    m_fixImageSrcInWebWhenCopied = getConfigFromSettings("web",
-                                                         "fix_img_src_when_copied").toBool();
-
-    m_stylesToRemoveWhenCopied = getConfigFromSettings("web",
-                                                       "styles_to_remove_when_copied").toStringList();
-
     m_stylesToInlineWhenCopied = getConfigFromSettings("web",
                                                        "styles_to_inline_when_copied").toStringList().join(",");
+
+    m_singleClickClosePreviousTab = getConfigFromSettings("global",
+                                                          "single_click_close_previous_tab").toBool();
+
+    m_enableFlashAnchor = getConfigFromSettings("web",
+                                                "enable_flash_anchor").toBool();
+
+    m_plantUMLMode = getConfigFromSettings("global", "plantuml_mode").toInt();
+    m_plantUMLServer = getConfigFromSettings("web", "plantuml_server").toString();
+    m_plantUMLJar = getConfigFromSettings("web", "plantuml_jar").toString();
+
+    QString plantUMLArgs = getConfigFromSettings("web", "plantuml_args").toString();
+    m_plantUMLArgs = VUtils::parseCombinedArgString(plantUMLArgs);
+
+    m_plantUMLCmd = getConfigFromSettings("web", "plantuml_cmd").toString();
+
+    m_enableGraphviz = getConfigFromSettings("global", "enable_graphviz").toBool();
+    m_graphvizDot = getConfigFromSettings("web", "graphviz_dot").toString();
+
+    m_historySize = getConfigFromSettings("global", "history_size").toInt();
+    if (m_historySize < 0) {
+        m_historySize = 0;
+    }
+
+    m_outlineExpandedLevel = getConfigFromSettings("global",
+                                                   "outline_expanded_level").toInt();
+
+    m_imageNamePrefix = getConfigFromSettings("global",
+                                              "image_name_prefix").toString();
 }
 
 void VConfigManager::initSettings()
@@ -334,18 +347,6 @@ void VConfigManager::initSettings()
 void VConfigManager::initFromSessionSettings()
 {
     curNotebookIndex = getConfigFromSessionSettings("global", "current_notebook").toInt();
-
-    m_mainWindowGeometry = getConfigFromSessionSettings("geometry",
-                                                        "main_window_geometry").toByteArray();
-
-    m_mainWindowState = getConfigFromSessionSettings("geometry",
-                                                     "main_window_state").toByteArray();
-
-    m_mainSplitterState = getConfigFromSessionSettings("geometry",
-                                                       "main_splitter_state").toByteArray();
-
-    m_naviSplitterState = getConfigFromSessionSettings("geometry",
-                                                       "navi_splitter_state").toByteArray();
 }
 
 void VConfigManager::readCustomColors()
@@ -403,7 +404,7 @@ void VConfigManager::writeNotebookToSettings(QSettings *p_settings,
         p_settings->setArrayIndex(i);
         const VNotebook &notebook = *p_notebooks[i];
         p_settings->setValue("name", notebook.getName());
-        p_settings->setValue("path", notebook.getPath());
+        p_settings->setValue("path", notebook.getPathInConfig());
     }
 
     p_settings->endArray();
@@ -487,24 +488,6 @@ void VConfigManager::setConfigToSessionSettings(const QString &p_section,
                                     p_section,
                                     p_key,
                                     p_value);
-}
-
-QString VConfigManager::fetchDirConfigFilePath(const QString &p_path)
-{
-    QDir dir(p_path);
-    QString fileName = c_dirConfigFile;
-
-    if (dir.exists(c_obsoleteDirConfigFile)) {
-        V_ASSERT(!dir.exists(c_dirConfigFile));
-        if (!dir.rename(c_obsoleteDirConfigFile, c_dirConfigFile)) {
-            fileName = c_obsoleteDirConfigFile;
-        }
-        qDebug() << "rename old directory config file:" << fileName;
-    }
-
-    QString filePath = QDir::cleanPath(dir.filePath(fileName));
-    qDebug() << "use directory config file:" << filePath;
-    return filePath;
 }
 
 QJsonObject VConfigManager::readDirectoryConfig(const QString &path)
@@ -639,6 +622,7 @@ void VConfigManager::updateMarkdownEditStyle()
     m_editorColorColumnBg = defaultColor;
     m_editorColorColumnFg = defaultColor;
     m_editorPreviewImageLineFg = defaultColor;
+    m_editorPreviewImageBg.clear();
 
     auto editorIt = styles.find("editor");
     if (editorIt != styles.end()) {
@@ -710,6 +694,11 @@ void VConfigManager::updateMarkdownEditStyle()
         it = editorIt->find("preview-image-line-foreground");
         if (it != editorIt->end()) {
             m_editorPreviewImageLineFg = "#" + *it;
+        }
+
+        it = editorIt->find("preview-image-background");
+        if (it != editorIt->end()) {
+            m_editorPreviewImageBg = "#" + *it;
         }
     }
 }
@@ -863,8 +852,22 @@ QString VConfigManager::getCssStyleUrl() const
         const_cast<VConfigManager *>(this)->m_cssStyle = VPalette::themeCssStyle(getThemeFile());
     }
 
+    QString cssPath = getCssStyleUrl(m_cssStyle);
+    qDebug() << "use css style file" << cssPath;
+    return cssPath;
+}
+
+QString VConfigManager::getCssStyleUrl(const QString &p_style) const
+{
+    Q_ASSERT(!m_themes.isEmpty());
+    Q_ASSERT(!m_cssStyles.isEmpty());
+
+    if (p_style.isEmpty()) {
+        return QString();
+    }
+
     QString cssPath;
-    auto it = m_cssStyles.find(m_cssStyle);
+    auto it = m_cssStyles.find(p_style);
     if (it != m_cssStyles.end()) {
         cssPath = it.value();
     }
@@ -876,7 +879,6 @@ QString VConfigManager::getCssStyleUrl() const
         cssPath = cssUrl.toString();
     }
 
-    qDebug() << "use css style file" << cssPath;
     return cssPath;
 }
 
@@ -891,8 +893,22 @@ QString VConfigManager::getCodeBlockCssStyleUrl() const
             VPalette::themeCodeBlockCssStyle(getThemeFile());
     }
 
+    QString cssPath = getCodeBlockCssStyleUrl(m_codeBlockCssStyle);
+    qDebug() << "use code block css style file" << cssPath;
+    return cssPath;
+}
+
+QString VConfigManager::getCodeBlockCssStyleUrl(const QString &p_style) const
+{
+    Q_ASSERT(!m_themes.isEmpty());
+    Q_ASSERT(!m_codeBlockCssStyles.isEmpty());
+
+    if (p_style.isEmpty()) {
+        return QString();
+    }
+
     QString cssPath;
-    auto it = m_codeBlockCssStyles.find(m_codeBlockCssStyle);
+    auto it = m_codeBlockCssStyles.find(p_style);
     if (it != m_codeBlockCssStyles.end()) {
         cssPath = it.value();
     }
@@ -904,8 +920,30 @@ QString VConfigManager::getCodeBlockCssStyleUrl() const
         cssPath = cssUrl.toString();
     }
 
-    qDebug() << "use code block css style file" << cssPath;
     return cssPath;
+}
+
+QString VConfigManager::getMermaidCssStyleUrl() const
+{
+    Q_ASSERT(!m_themes.isEmpty());
+    Q_ASSERT(!m_theme.isEmpty());
+
+    static QString mermaidCssPath;
+
+    if (mermaidCssPath.isEmpty()) {
+        VPaletteMetaData data = VPalette::getPaletteMetaData(getThemeFile());
+        mermaidCssPath = data.m_mermaidCssFile;
+        if (mermaidCssPath.startsWith(":")) {
+            mermaidCssPath = "qrc" + mermaidCssPath;
+        } else {
+            QUrl cssUrl = QUrl::fromLocalFile(mermaidCssPath);
+            mermaidCssPath = cssUrl.toString();
+        }
+
+        qDebug() << "use mermaid css style file" << mermaidCssPath;
+    }
+
+    return mermaidCssPath;
 }
 
 QString VConfigManager::getEditorStyleFile() const
@@ -928,7 +966,32 @@ QString VConfigManager::getEditorStyleFile() const
 
 QString VConfigManager::getVnoteNotebookFolderPath()
 {
-    return QDir::home().filePath(c_vnoteNotebookFolderName);
+    QStringList folders = QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation);
+    if (folders.isEmpty()) {
+        return QDir::home().filePath(c_vnoteNotebookFolderName);
+    } else {
+        return QDir(folders[0]).filePath(c_vnoteNotebookFolderName);
+    }
+}
+
+QString VConfigManager::getExportFolderPath()
+{
+    QStringList folders = QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation);
+    if (folders.isEmpty()) {
+        return QDir::home().filePath(c_exportFolderName);
+    } else {
+        return QDir(folders[0]).filePath(c_exportFolderName);
+    }
+}
+
+QString VConfigManager::getDocumentPathOrHomePath()
+{
+    QStringList folders = QStandardPaths::standardLocations(QStandardPaths::DocumentsLocation);
+    if (folders.isEmpty()) {
+        return QDir::homePath();
+    } else {
+        return folders[0];
+    }
 }
 
 QHash<QString, QString> VConfigManager::readShortcutsFromSettings(QSettings *p_settings,
@@ -1144,9 +1207,81 @@ void VConfigManager::setLastOpenedFiles(const QVector<VFileSessionInfo> &p_files
     }
 
     m_sessionSettings->endArray();
-    qDebug() << "write" << p_files.size()
-             << "items in [last_opened_files] section";
+}
 
+void VConfigManager::getHistory(QLinkedList<VHistoryEntry> &p_history) const
+{
+    p_history.clear();
+
+    int size = m_sessionSettings->beginReadArray("history");
+    for (int i = 0; i < size; ++i) {
+        m_sessionSettings->setArrayIndex(i);
+        p_history.append(VHistoryEntry::fromSettings(m_sessionSettings));
+    }
+
+    m_sessionSettings->endArray();
+}
+
+void VConfigManager::setHistory(const QLinkedList<VHistoryEntry> &p_history)
+{
+    if (m_hasReset) {
+        return;
+    }
+
+    const QString section("history");
+
+    // Clear it first
+    m_sessionSettings->beginGroup(section);
+    m_sessionSettings->remove("");
+    m_sessionSettings->endGroup();
+
+    m_sessionSettings->beginWriteArray(section);
+    int i = 0;
+    for (auto it = p_history.begin(); it != p_history.end(); ++it, ++i) {
+        m_sessionSettings->setArrayIndex(i);
+        it->toSettings(m_sessionSettings);
+    }
+
+    m_sessionSettings->endArray();
+}
+
+void VConfigManager::getExplorerEntries(QVector<VExplorerEntry> &p_entries) const
+{
+    p_entries.clear();
+
+    int size = m_sessionSettings->beginReadArray("explorer_starred");
+    for (int i = 0; i < size; ++i) {
+        m_sessionSettings->setArrayIndex(i);
+        p_entries.append(VExplorerEntry::fromSettings(m_sessionSettings));
+    }
+
+    m_sessionSettings->endArray();
+}
+
+void VConfigManager::setExplorerEntries(const QVector<VExplorerEntry> &p_entries)
+{
+    if (m_hasReset) {
+        return;
+    }
+
+    const QString section("explorer_starred");
+
+    // Clear it first
+    m_sessionSettings->beginGroup(section);
+    m_sessionSettings->remove("");
+    m_sessionSettings->endGroup();
+
+    m_sessionSettings->beginWriteArray(section);
+    int idx = 0;
+    for (auto const & entry : p_entries) {
+        if (entry.m_isStarred) {
+            m_sessionSettings->setArrayIndex(idx);
+            entry.toSettings(m_sessionSettings);
+            ++idx;
+        }
+    }
+
+    m_sessionSettings->endArray();
 }
 
 QVector<VMagicWord> VConfigManager::getCustomMagicWords()
@@ -1230,20 +1365,20 @@ void VConfigManager::initThemes()
     m_themes.clear();
 
     // Built-in.
-    QString file(":/resources/themes/v_white/v_white.palette");
+    QString file(":/resources/themes/v_native/v_native.palette");
     m_themes.insert(VPalette::themeName(file), file);
     file = ":/resources/themes/v_pure/v_pure.palette";
     m_themes.insert(VPalette::themeName(file), file);
     file = ":/resources/themes/v_moonlight/v_moonlight.palette";
     m_themes.insert(VPalette::themeName(file), file);
-
-    /* NOT ready yet. Wait for author's tuning.
-    file = ":/resources/themes/v_material/v_material.palette";
+    file = ":/resources/themes/v_detorte/v_detorte.palette";
     m_themes.insert(VPalette::themeName(file), file);
-    */
+
+    outputBuiltInThemes();
 
     // User theme folder.
     QDir dir(getThemeConfigFolder());
+    Q_ASSERT(dir.exists());
     if (!dir.exists()) {
         dir.mkpath(getThemeConfigFolder());
         return;
@@ -1260,6 +1395,53 @@ void VConfigManager::initThemes()
 
         QFileInfo fi(files[0]);
         m_themes.insert(VPalette::themeName(files[0]), themeDir.filePath(files[0]));
+    }
+}
+
+void VConfigManager::outputBuiltInThemes()
+{
+    QDir dir(getThemeConfigFolder());
+    if (!dir.exists()) {
+        dir.mkpath(getThemeConfigFolder());
+    }
+
+    QStringList suffix({"*.palette"});
+
+    for (auto it = m_themes.begin(); it != m_themes.end(); ++it) {
+        QString file = it.value();
+        QString srcDir = VUtils::basePathFromPath(file);
+        QString folder = VUtils::directoryNameFromPath(srcDir);
+
+        bool needOutput = false;
+        if (dir.exists(folder)) {
+            QString folderPath = dir.filePath(folder);
+            QDir tmpDir(folderPath);
+            QStringList files = tmpDir.entryList(suffix);
+            if (files.size() == 1) {
+                int newVer = VPalette::getPaletteVersion(file);
+                int curVer = VPalette::getPaletteVersion(tmpDir.filePath(files[0]));
+                if (newVer != curVer) {
+                    needOutput = true;
+                }
+            } else {
+                needOutput = true;
+            }
+
+            if (needOutput) {
+                // Delete the folder.
+                bool ret = VUtils::deleteDirectory(folderPath);
+                VUtils::sleepWait(100);
+                Q_UNUSED(ret);
+                qDebug() << "delete obsolete theme" << folderPath << ret;
+            }
+        } else {
+            needOutput = true;
+        }
+
+        if (needOutput) {
+            qDebug() << "output built-in theme" << file << folder;
+            VUtils::copyDirectory(srcDir, dir.filePath(folder), false);
+        }
     }
 }
 
@@ -1347,9 +1529,36 @@ void VConfigManager::resetConfigurations()
     m_hasReset = true;
 }
 
+void VConfigManager::resetLayoutConfigurations()
+{
+    resetDefaultConfig("global", "tools_dock_checked");
+    resetDefaultConfig("global", "search_dock_checked");
+    resetDefaultConfig("global", "menu_bar_checked");
+
+    clearGroupOfSettings(m_sessionSettings, "geometry");
+
+    m_hasReset = true;
+}
+
 void VConfigManager::clearGroupOfSettings(QSettings *p_settings, const QString &p_group)
 {
     p_settings->beginGroup(p_group);
     p_settings->remove("");
     p_settings->endGroup();
 }
+
+QString VConfigManager::getRenderBackgroundColor(const QString &p_bgName) const
+{
+    if (p_bgName == "Transparent") {
+        return "transparent";
+    } else if (p_bgName != "System") {
+        for (int i = 0; i < m_customColors.size(); ++i) {
+            if (m_customColors[i].m_name == p_bgName) {
+                return m_customColors[i].m_color;
+            }
+        }
+    }
+
+    return QString();
+}
+

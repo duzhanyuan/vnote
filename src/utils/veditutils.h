@@ -184,10 +184,20 @@ public:
     // Return the leading spaces of @p_block.
     static QString fetchIndentSpaces(const QTextBlock &p_block);
 
+    static int fetchIndentation(const QString &p_text);
+
+    static int fetchIndentation(const QTextBlock &p_block);
+
     // Insert a block above/below current block. Move the cursor to the start of
     // the new block after insertion.
     static void insertBlock(QTextCursor &p_cursor,
                             bool p_above);
+
+    // Insert @p_str in the front of each line of @p_text.
+    static void insertBeforeEachLine(QString &p_text, const QString &p_str);
+
+    // Whether @p_block is empty.
+    static bool isEmptyBlock(const QTextBlock &p_block);
 
 private:
     VEditUtils() {}

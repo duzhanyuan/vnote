@@ -8,6 +8,8 @@
 #include <QMessageBox>
 #include <QUrl>
 #include <QDir>
+#include <functional>
+
 #include "vconfigmanager.h"
 #include "vconstants.h"
 
@@ -18,6 +20,9 @@ class VNotebook;
 class QWidget;
 class QComboBox;
 class QWebEngineView;
+class QAction;
+class QTreeWidgetItem;
+class QFormLayout;
 
 #if !defined(V_ASSERT)
     #define V_ASSERT(cond) ((!(cond)) ? qt_assert(#cond, __FILE__, __LINE__) : qt_noop())
@@ -80,7 +85,9 @@ class VUtils
 public:
     static QString readFileFromDisk(const QString &filePath);
 
-    static bool writeFileToDisk(const QString &filePath, const QString &text);
+    static bool writeFileToDisk(const QString &p_filePath, const QString &p_text);
+
+    static bool writeFileToDisk(const QString &p_filePath, const QByteArray &p_data);
 
     static bool writeJsonToDisk(const QString &p_filePath, const QJsonObject &p_json);
 
@@ -103,8 +110,6 @@ public:
     // @p_parentDirPath.
     static QString generateCopiedDirName(const QString &p_parentDirPath,
                                          const QString &p_dirName);
-
-    static void processStyle(QString &style, const QVector<QPair<QString, QString> > &varMap);
 
     // Return the last directory name of @p_path.
     static QString directoryNameFromPath(const QString& p_path);
@@ -167,9 +172,25 @@ public:
     static DocType docTypeFromName(const QString &p_name);
 
     // Generate HTML template.
-    static QString generateHtmlTemplate(MarkdownConverterType p_conType, bool p_exportPdf);
+    static QString generateHtmlTemplate(MarkdownConverterType p_conType);
+
+    // @p_renderBg is the background name.
+    // @p_wkhtmltopdf: whether this template is used for wkhtmltopdf.
+    static QString generateHtmlTemplate(MarkdownConverterType p_conType,
+                                        const QString &p_renderBg,
+                                        const QString &p_renderStyle,
+                                        const QString &p_renderCodeBlockStyle,
+                                        bool p_isPDF,
+                                        bool p_wkhtmltopdf = false,
+                                        bool p_addToc = false);
+
+    // @p_renderBg is the background name.
+    static QString generateExportHtmlTemplate(const QString &p_renderBg, bool p_includeMathJax);
 
     static QString generateSimpleHtmlTemplate(const QString &p_body);
+
+    // Generate template for MathJax preview.
+    static QString generateMathJaxPreviewTemplate();
 
     // Get an available file name in @p_directory with base @p_baseFileName.
     // If there already exists a file named @p_baseFileName, try to add sequence
@@ -221,6 +242,8 @@ public:
                                 const QString &p_path,
                                 bool p_skipRecycleBin = false);
 
+    static bool deleteDirectory(const QString &p_path);
+
     // Empty all files in directory recursively specified by @p_path.
     // Will just move files to the recycle bin of @p_notebook if
     // @p_skipRecycleBin is false.
@@ -245,7 +268,9 @@ public:
     // Delete file specified by @p_path.
     static bool deleteFile(const QString &p_path);
 
-    static QString displayDateTime(const QDateTime &p_dateTime);
+    // @p_uniformNum: if true, we use YYYY/MM/DD HH:mm:ss form, which is good for
+    // sorting.
+    static QString displayDateTime(const QDateTime &p_dateTime, bool p_uniformNum = false);
 
     // Check if file @p_name exists in @p_dir.
     // @p_forceCaseInsensitive: if true, will check the name ignoring the case.
@@ -277,26 +302,72 @@ public:
 
     static void setDynamicProperty(QWidget *p_widget, const char *p_prop, bool p_val = true);
 
-    // Return a file name with locale.
-    static QString getFileNameWithLocale(const QString &p_name);
+    // Return a file name with locale @p_locale.
+    // If @p_locale is empty, use system's locale instead.
+    static QString getFileNameWithLocale(const QString &p_name,
+                                         const QString &p_locale = QString());
 
     // Return a doc file path.
     static QString getDocFile(const QString &p_name);
 
+    static QString getCaptainShortcutSequenceText(const QString &p_operation);
+
+    static QString getAvailableFontFamily(const QStringList &p_families);
+
+    static bool fixTextWithShortcut(QAction *p_act, const QString &p_shortcut);
+
+    static bool fixTextWithCaptainShortcut(QAction *p_act, const QString &p_shortcut);
+
+    // From QProcess code.
+    static QStringList parseCombinedArgString(const QString &p_program);
+
+    static const QTreeWidgetItem *topLevelTreeItem(const QTreeWidgetItem *p_item);
+
+    // Read QImage from local file @p_filePath.
+    // Directly calling QImage(p_filePath) will judge the image format from the suffix,
+    // resulting a null image in wrong suffix case.
+    static QImage imageFromFile(const QString &p_filePath);
+
+    static QPixmap pixmapFromFile(const QString &p_filePath);
+
+    // Return QFormLayout.
+    static QFormLayout *getFormLayout();
+
+    static bool inSameDrive(const QString &p_a, const QString &p_b);
+
+    static QString promptForFileName(const QString &p_title,
+                                     const QString &p_label,
+                                     const QString &p_default,
+                                     const QString &p_dir,
+                                     QWidget *p_parent = nullptr);
+
+    static QString promptForFileName(const QString &p_title,
+                                     const QString &p_label,
+                                     const QString &p_default,
+                                     std::function<bool(const QString &p_name)> p_checkExistsFunc,
+                                     QWidget *p_parent = nullptr);
+
+    // Whether @p_html has only <img> content.
+    static bool onlyHasImgInHtml(const QString &p_html);
+
     // Regular expression for image link.
-    // ![image title]( http://github.com/tamlok/vnote.jpg "alt \" text" )
+    // ![image title]( http://github.com/tamlok/vnote.jpg "alt text" =200x100)
     // Captured texts (need to be trimmed):
     // 1. Image Alt Text (Title);
     // 2. Image URL;
-    // 3. Image Optional Title with double quotes;
+    // 3. Image Optional Title with double quotes or quotes;
     // 4. Unused;
+    // 5. Unused;
+    // 6. Unused;
+    // 7. Width;
+    // 8. Height;
     static const QString c_imageLinkRegExp;
 
     // Regular expression for image title.
     static const QString c_imageTitleRegExp;
 
     // Regular expression for file/directory name.
-    // Forbidden char: \/:*?"<>|
+    // Forbidden char: \/:*?"<>| and whitespaces except space.
     static const QString c_fileNameRegExp;
 
     // Regular expression for fenced code block.
@@ -324,13 +395,19 @@ private:
 
     static void initAvailableLanguage();
 
-    // Use HGMarkdownParser to parse @p_content to get all image link regions.
+    // Use PegParser to parse @p_content to get all image link regions.
     static QVector<VElementRegion> fetchImageRegionsUsingParser(const QString &p_content);
 
     // Delete file/directory specified by @p_path by moving it to the recycle bin
     // folder @p_recycleBinFolderPath.
     static bool deleteFile(const QString &p_recycleBinFolderPath,
                            const QString &p_path);
+
+    static QString generateHtmlTemplate(const QString &p_template,
+                                        MarkdownConverterType p_conType,
+                                        bool p_isPDF = false,
+                                        bool p_wkhtmltopdf = false,
+                                        bool p_addToc = false);
 
     // <value, name>
     static QVector<QPair<QString, QString>> s_availableLanguages;

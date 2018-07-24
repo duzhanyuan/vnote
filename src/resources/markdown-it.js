@@ -1,4 +1,3 @@
-var placeholder = document.getElementById('placeholder');
 var nameCounter = 0;
 var toc = []; // Table of Content as a list
 
@@ -36,24 +35,24 @@ var getHeadingLevel = function(h) {
 }
 
 // There is a VMarkdownitOption struct passed in.
-// var VMarkdownitOption = { html, breaks, linkify };
+// var VMarkdownitOption = { html, breaks, linkify, sub, sup };
 var mdit = window.markdownit({
     html: VMarkdownitOption.html,
     breaks: VMarkdownitOption.breaks,
     linkify: VMarkdownitOption.linkify,
-    typographer: true,
+    typographer: false,
     langPrefix: 'lang-',
     highlight: function(str, lang) {
-        if (lang) {
+        if (lang && (!specialCodeBlock(lang) || highlightSpecialBlocks)) {
             if (hljs.getLanguage(lang)) {
-                return hljs.highlight(lang, str).value;
+                return hljs.highlight(lang, str, true).value;
             } else {
                 return hljs.highlightAuto(str).value;
             }
-        } else {
-            // Use external default escaping.
-            return '';
         }
+
+        // Use external default escaping.
+        return '';
     }
 });
 
@@ -73,12 +72,45 @@ mdit = mdit.use(window.markdownitHeadingAnchor, {
     }
 });
 
+// Enable file: scheme.
+var validateLinkMDIT = mdit.validateLink;
+var fileSchemeRE = /^file:/;
+mdit.validateLink = function(url) {
+    var str = url.trim().toLowerCase();
+    return fileSchemeRE.test(str) ? true : validateLinkMDIT(url);
+};
+
 mdit = mdit.use(window.markdownitTaskLists);
-/*
-mdit = mdit.use(window.markdownitSub);
-mdit = mdit.use(window.markdownitSup);
-*/
+
+if (VMarkdownitOption.sub) {
+    mdit = mdit.use(window.markdownitSub);
+}
+
+if (VMarkdownitOption.sup) {
+    mdit = mdit.use(window.markdownitSup);
+}
+
+var metaDataText = null;
+if (VMarkdownitOption.metadata) {
+    mdit = mdit.use(window.markdownitFrontMatter, function(text){
+        metaDataText = text;
+    });
+}
+
+if (VMarkdownitOption.emoji) {
+    mdit = mdit.use(window.markdownitEmoji);
+    mdit.renderer.rules.emoji = function(token, idx) {
+        return '<span class="emoji emoji_' + token[idx].markup + '">' + token[idx].content + '</span>';
+    };
+}
+
 mdit = mdit.use(window.markdownitFootnote);
+
+mdit = mdit.use(window["markdown-it-imsize.js"]);
+
+if (typeof texmath != 'undefined') {
+    mdit = mdit.use(texmath, { delimiters: 'dollars' });
+}
 
 var mdHasTocSection = function(markdown) {
     var n = markdown.search(/(\n|^)\[toc\]/i);
@@ -97,43 +129,132 @@ var markdownToHtml = function(markdown, needToc) {
 };
 
 var updateText = function(text) {
+    if (VAddTOC) {
+        text = "[TOC]\n\n" + text;
+    }
+
+    // There is at least one async job for MathJax.
+    asyncJobsCount = 1;
+    metaDataText = null;
+
     var needToc = mdHasTocSection(text);
     var html = markdownToHtml(text, needToc);
-    placeholder.innerHTML = html;
+    contentDiv.innerHTML = html;
     handleToc(needToc);
     insertImageCaption();
+    setupImageView();
+    handleMetaData();
     renderMermaid('lang-mermaid');
-    renderFlowchart('lang-flowchart');
+    renderFlowchart(['lang-flowchart', 'lang-flow']);
+    renderPlantUML('lang-puml');
+    renderGraphviz('lang-dot');
     addClassToCodeBlock();
     renderCodeBlockLineNumber();
 
     // If you add new logics after handling MathJax, please pay attention to
     // finishLoading logic.
     if (VEnableMathjax) {
+        var texToRender = document.getElementsByClassName('tex-to-render');
+        var nrTex = texToRender.length;
+        if (nrTex == 0) {
+            finishOneAsyncJob();
+            return;
+        }
+
+        var eles = [];
+        for (var i = 0; i < nrTex; ++i) {
+            eles.push(texToRender[i]);
+        }
+
         try {
-            MathJax.Hub.Queue(["Typeset", MathJax.Hub, placeholder, finishLogics]);
+            MathJax.Hub.Queue(["Typeset", MathJax.Hub, eles, postProcessMathJax]);
         } catch (err) {
             content.setLog("err: " + err);
-            finishLogics();
+            finishOneAsyncJob();
         }
     } else {
-        finishLogics();
+        finishOneAsyncJob();
     }
 };
 
 var highlightText = function(text, id, timeStamp) {
+    highlightSpecialBlocks = true;
     var html = mdit.render(text);
+    highlightSpecialBlocks = false;
     content.highlightTextCB(html, id, timeStamp);
-}
+};
 
-var textToHtml = function(text) {
+var textToHtml = function(identifier, id, timeStamp, text, inlineStyle) {
     var html = mdit.render(text);
-    var container = document.getElementById('text-to-html-div');
-    container.innerHTML = html;
+    if (inlineStyle) {
+        var container = textHtmlDiv;
+        container.innerHTML = html;
+        html = getHtmlWithInlineStyles(container);
+        container.innerHTML = "";
+    }
 
-    html = getHtmlWithInlineStyles(container);
+    content.textToHtmlCB(identifier, id, timeStamp, html);
+};
 
-    container.innerHTML = "";
+// Add a PRE containing metaDataText if it is not empty.
+var handleMetaData = function() {
+    if (!metaDataText || metaDataText.length == 0) {
+        return;
+    }
 
-    content.textToHtmlCB(text, html);
-}
+    var pre = document.createElement('pre');
+    var code = document.createElement('code');
+    code.classList.add(VMetaDataCodeClass);
+
+    var text = hljs.highlight('yaml', metaDataText, true).value;
+    code.innerHTML = text;
+
+    pre.appendChild(code);
+    contentDiv.insertAdjacentElement('afterbegin', pre);
+};
+
+var postProcessMathJaxWhenMathjaxReady = function() {
+    var all = MathJax.Hub.getAllJax();
+    for (var i = 0; i < all.length; ++i) {
+        var node = all[i].SourceElement().parentNode;
+        if (VRemoveMathjaxScript) {
+            // Remove the SourceElement.
+            try {
+                node.removeChild(all[i].SourceElement());
+            } catch (err) {
+                content.setLog("err: " + err);
+            }
+        }
+
+        if (node.tagName.toLowerCase() == 'code') {
+            var pre = node.parentNode;
+            var p = document.createElement('p');
+            p.innerHTML = node.innerHTML;
+            pre.parentNode.replaceChild(p, pre);
+        }
+    }
+};
+
+var handleMathjaxReady = function() {
+    if (!VEnableMathjax) {
+        return;
+    }
+
+    var texToRender = document.getElementsByClassName('tex-to-render');
+    var nrTex = texToRender.length;
+    if (nrTex == 0) {
+        return;
+    }
+
+    var eles = [];
+    for (var i = 0; i < nrTex; ++i) {
+        eles.push(texToRender[i]);
+    }
+
+    try {
+        MathJax.Hub.Queue(["Typeset", MathJax.Hub, eles, postProcessMathJaxWhenMathjaxReady]);
+    } catch (err) {
+        content.setLog("err: " + err);
+        finishOneAsyncJob();
+    }
+};

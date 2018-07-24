@@ -8,7 +8,6 @@
 #include <QJsonArray>
 #include <QDebug>
 
-#include "utils/vutils.h"
 #include "vdirectory.h"
 
 VNoteFile::VNoteFile(VDirectory *p_directory,
@@ -16,12 +15,8 @@ VNoteFile::VNoteFile(VDirectory *p_directory,
                      FileType p_type,
                      bool p_modifiable,
                      QDateTime p_createdTimeUtc,
-                     QDateTime p_modifiedTimeUtc,
-                     const QString &p_attachmentFolder,
-                     const QVector<VAttachment> &p_attachments)
-    : VFile(p_directory, p_name, p_type, p_modifiable, p_createdTimeUtc, p_modifiedTimeUtc),
-      m_attachmentFolder(p_attachmentFolder),
-      m_attachments(p_attachments)
+                     QDateTime p_modifiedTimeUtc)
+    : VFile(p_directory, p_name, p_type, p_modifiable, p_createdTimeUtc, p_modifiedTimeUtc)
 {
 }
 
@@ -130,24 +125,32 @@ VNoteFile *VNoteFile::fromJson(VDirectory *p_directory,
                                FileType p_type,
                                bool p_modifiable)
 {
+    VNoteFile *file = new VNoteFile(p_directory,
+                                    p_json[DirConfig::c_name].toString(),
+                                    p_type,
+                                    p_modifiable,
+                                    QDateTime::fromString(p_json[DirConfig::c_createdTime].toString(),
+                                                          Qt::ISODate),
+                                    QDateTime::fromString(p_json[DirConfig::c_modifiedTime].toString(),
+                                                          Qt::ISODate));
+
+    // Attachment Folder.
+    file->m_attachmentFolder = p_json[DirConfig::c_attachmentFolder].toString();
+
     // Attachments.
     QJsonArray attachmentJson = p_json[DirConfig::c_attachments].toArray();
-    QVector<VAttachment> attachments;
     for (int i = 0; i < attachmentJson.size(); ++i) {
         QJsonObject attachmentItem = attachmentJson[i].toObject();
-        attachments.push_back(VAttachment(attachmentItem[DirConfig::c_name].toString()));
+        file->m_attachments.push_back(VAttachment(attachmentItem[DirConfig::c_name].toString()));
     }
 
-    return new VNoteFile(p_directory,
-                         p_json[DirConfig::c_name].toString(),
-                         p_type,
-                         p_modifiable,
-                         QDateTime::fromString(p_json[DirConfig::c_createdTime].toString(),
-                                               Qt::ISODate),
-                         QDateTime::fromString(p_json[DirConfig::c_modifiedTime].toString(),
-                                               Qt::ISODate),
-                         p_json[DirConfig::c_attachmentFolder].toString(),
-                         attachments);
+    // Tags.
+    QJsonArray tagsJson = p_json[DirConfig::c_tags].toArray();
+    for (int i = 0; i < tagsJson.size(); ++i) {
+        file->m_tags.append(tagsJson[i].toString());
+    }
+
+    return file;
 }
 
 QJsonObject VNoteFile::toConfigJson() const
@@ -161,13 +164,21 @@ QJsonObject VNoteFile::toConfigJson() const
     // Attachments.
     QJsonArray attachmentJson;
     for (int i = 0; i < m_attachments.size(); ++i) {
-        const VAttachment &item = m_attachments[i];
+        const VAttachment &att = m_attachments[i];
         QJsonObject attachmentItem;
-        attachmentItem[DirConfig::c_name] = item.m_name;
+        attachmentItem[DirConfig::c_name] = att.m_name;
         attachmentJson.append(attachmentItem);
     }
 
     item[DirConfig::c_attachments] = attachmentJson;
+
+    // Tags.
+    QJsonArray tags;
+    for (auto const & tag : m_tags) {
+        tags.append(tag);
+    }
+
+    item[DirConfig::c_tags] = tags;
 
     return item;
 }
@@ -510,42 +521,12 @@ bool VNoteFile::copyFile(VDirectory *p_destDir,
     }
 
     // Copy images.
-    QDir parentDir(destFile->fetchBasePath());
-    QSet<QString> processedImages;
-    for (int i = 0; i < images.size(); ++i) {
-        const ImageLink &link = images[i];
-        if (processedImages.contains(link.m_path)) {
-            continue;
-        }
-
-        processedImages.insert(link.m_path);
-
-        if (!QFileInfo::exists(link.m_path)) {
-            VUtils::addErrMsg(p_errMsg, tr("Source image %1 does not exist.")
-                                          .arg(link.m_path));
-            ret = false;
-            continue;
-        }
-
-        QString imageFolder = VUtils::directoryNameFromPath(VUtils::basePathFromPath(link.m_path));
-        QString destImagePath = QDir(parentDir.filePath(imageFolder)).filePath(VUtils::fileNameFromPath(link.m_path));
-
-        if (VUtils::equalPath(link.m_path, destImagePath)) {
-            VUtils::addErrMsg(p_errMsg, tr("Skip image with the same source and target path %1.")
-                                          .arg(link.m_path));
-            ret = false;
-            continue;
-        }
-
-        if (!VUtils::copyFile(link.m_path, destImagePath, p_isCut)) {
-            VUtils::addErrMsg(p_errMsg, tr("Fail to %1 image %2 to %3. "
-                                           "Please manually %1 it and modify the note.")
-                                          .arg(opStr).arg(link.m_path).arg(destImagePath));
-            ret = false;
-        } else {
-            ++nrImageCopied;
-            qDebug() << opStr << "image" << link.m_path << "to" << destImagePath;
-        }
+    if (!copyInternalImages(images,
+                            destFile->fetchBasePath(),
+                            p_isCut,
+                            &nrImageCopied,
+                            p_errMsg)) {
+        ret = false;
     }
 
     // Copy attachment folder.
@@ -587,3 +568,101 @@ bool VNoteFile::copyFile(VDirectory *p_destDir,
     return ret;
 }
 
+bool VNoteFile::copyInternalImages(const QVector<ImageLink> &p_images,
+                                   const QString &p_destDirPath,
+                                   bool p_isCut,
+                                   int *p_nrImageCopied,
+                                   QString *p_errMsg)
+{
+    bool ret = true;
+    QDir parentDir(p_destDirPath);
+    QSet<QString> processedImages;
+    QString opStr = p_isCut ? tr("cut") : tr("copy");
+    int nrImageCopied = 0;
+    for (int i = 0; i < p_images.size(); ++i) {
+        const ImageLink &link = p_images[i];
+        if (processedImages.contains(link.m_path)) {
+            continue;
+        }
+
+        processedImages.insert(link.m_path);
+
+        if (!QFileInfo::exists(link.m_path)) {
+            VUtils::addErrMsg(p_errMsg, tr("Source image %1 does not exist.")
+                                          .arg(link.m_path));
+            ret = false;
+            continue;
+        }
+
+        QString imageFolder = VUtils::directoryNameFromPath(VUtils::basePathFromPath(link.m_path));
+        QString destImagePath = QDir(parentDir.filePath(imageFolder)).filePath(VUtils::fileNameFromPath(link.m_path));
+
+        if (VUtils::equalPath(link.m_path, destImagePath)) {
+            VUtils::addErrMsg(p_errMsg, tr("Skip image with the same source and target path %1.")
+                                          .arg(link.m_path));
+            ret = false;
+            continue;
+        }
+
+        if (!VUtils::copyFile(link.m_path, destImagePath, p_isCut)) {
+            VUtils::addErrMsg(p_errMsg, tr("Fail to %1 image %2 to %3. "
+                                           "Please manually %1 it and modify the note.")
+                                          .arg(opStr).arg(link.m_path).arg(destImagePath));
+            ret = false;
+        } else {
+            ++nrImageCopied;
+            qDebug() << opStr << "image" << link.m_path << "to" << destImagePath;
+        }
+    }
+
+    *p_nrImageCopied = nrImageCopied;
+    return ret;
+}
+
+void VNoteFile::removeTag(const QString &p_tag)
+{
+    if (p_tag.isEmpty() || m_tags.isEmpty()) {
+        return;
+    }
+
+    int nr = m_tags.removeAll(p_tag);
+    if (nr > 0) {
+        if (!getDirectory()->updateFileConfig(this)) {
+            qWarning() << "fail to update config of file" << m_name
+                       << "in directory" << fetchBasePath();
+        }
+    }
+}
+
+bool VNoteFile::addTag(const QString &p_tag)
+{
+    Q_ASSERT(isOpened());
+
+    if (p_tag.isEmpty() || hasTag(p_tag)) {
+        return false;
+    }
+
+    m_tags.append(p_tag);
+    if (!getDirectory()->updateFileConfig(this)) {
+        qWarning() << "fail to update config of file" << m_name
+                   << "in directory" << fetchBasePath();
+        m_tags.removeAll(p_tag);
+        return false;
+    }
+
+    return true;
+}
+
+bool VNoteFile::save()
+{
+    bool ret = VFile::save();
+    if (ret) {
+        if (!getDirectory()->updateFileConfig(this)) {
+            qWarning() << "fail to update config of file" << m_name
+                       << "in directory" << fetchBasePath();
+            ret = false;
+        }
+    }
+
+    return ret;
+}

@@ -9,6 +9,8 @@
 #include <QStringList>
 #include <QDir>
 #include <QSslSocket>
+#include <QOpenGLContext>
+
 #include "utils/vutils.h"
 #include "vsingleinstanceguard.h"
 #include "vconfigmanager.h"
@@ -21,6 +23,9 @@ VPalette *g_palette;
 #if defined(QT_NO_DEBUG)
 // 5MB log size.
 #define MAX_LOG_SIZE 5 * 1024 * 1024
+
+// Whether print debug log in RELEASE mode.
+bool g_debugLog = false;
 
 QFile g_logFile;
 
@@ -37,6 +42,12 @@ static void initLogFile(const QString &p_file)
 
 void VLogger(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
+#if defined(QT_NO_DEBUG)
+    if (!g_debugLog && type == QtDebugMsg) {
+        return;
+    }
+#endif
+
     QByteArray localMsg = msg.toUtf8();
     QString header;
 
@@ -59,6 +70,9 @@ void VLogger(QtMsgType type, const QMessageLogContext &context, const QString &m
 
     case QtFatalMsg:
         header = "Fatal:";
+
+    default:
+        break;
     }
 
 #if defined(QT_NO_DEBUG)
@@ -72,7 +86,6 @@ void VLogger(QtMsgType type, const QMessageLogContext &context, const QString &m
         g_logFile.close();
         abort();
     }
-
 #else
     std::string fileStr = QFileInfo(context.file).fileName().toStdString();
     const char *file = fileStr.c_str();
@@ -114,6 +127,10 @@ int main(int argc, char *argv[])
         QTextCodec::setCodecForLocale(codec);
     }
 
+    // Set openGL version.
+    // Or set environment QT_OPENGL to "angle/desktop/software".
+    // QCoreApplication::setAttribute(Qt::AA_UseOpenGLES, true);
+
     QApplication app(argc, argv);
 
     // The file path passed via command line arguments.
@@ -134,7 +151,18 @@ int main(int argc, char *argv[])
     vconfig.initialize();
     g_config = &vconfig;
 
+    bool checkSSL = true;
+
 #if defined(QT_NO_DEBUG)
+    checkSSL = false;
+    for (int i = 1; i < argc; ++i) {
+        if (!qstrcmp(argv[i], "-d")) {
+            g_debugLog = true;
+            checkSSL = true;
+            break;
+        }
+    }
+
     initLogFile(vconfig.getLogFilePath());
 #endif
 
@@ -150,8 +178,12 @@ int main(int argc, char *argv[])
     qDebug() << "files to open from arguments" << filePaths;
 
     // Check the openSSL.
-    qDebug() << "openSSL" << QSslSocket::sslLibraryBuildVersionString()
-             << QSslSocket::sslLibraryVersionNumber();
+    if (checkSSL) {
+        qDebug() << "openGL" << QOpenGLContext::openGLModuleType();
+        qDebug() << "openSSL"
+                 << QSslSocket::sslLibraryBuildVersionString()
+                 << QSslSocket::sslLibraryVersionNumber();
+    }
 
     // Load missing translation for Qt (QTextEdit/QPlainTextEdit/QTextBrowser).
     QTranslator qtTranslator1;
@@ -198,11 +230,7 @@ int main(int argc, char *argv[])
 
     w.show();
 
-    w.openStartupPages();
-
-    w.openFiles(filePaths);
-
-    w.promptNewNotebookIfEmpty();
+    w.kickOffStartUpTimer(filePaths);
 
     return app.exec();
 }

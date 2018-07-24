@@ -1,4 +1,3 @@
-var placeholder = document.getElementById('placeholder');
 var renderer = new showdown.Converter({simplifiedAutoLink: 'true',
                                        excludeTrailingPunctuationFromURLs: 'true',
                                        strikethrough: 'true',
@@ -24,7 +23,7 @@ var parseHeadings = function(html) {
         toc.push({
             level: level,
             anchor: ele.id,
-            title: ele.innerHTML
+            title: escapeHtml(ele.textContent)
         });
     }
 
@@ -49,7 +48,12 @@ var mdHasTocSection = function(markdown) {
     return n != -1;
 };
 
-var highlightCodeBlocks = function(doc, enableMermaid, enableFlowchart) {
+var highlightCodeBlocks = function(doc,
+                                   enableMermaid,
+                                   enableFlowchart,
+                                   enableMathJax,
+                                   enablePlantUML,
+                                   enableGraphviz) {
     var codes = doc.getElementsByTagName('code');
     for (var i = 0; i < codes.length; ++i) {
         var code = codes[i];
@@ -57,8 +61,19 @@ var highlightCodeBlocks = function(doc, enableMermaid, enableFlowchart) {
             if (enableMermaid && code.classList.contains('language-mermaid')) {
                 // Mermaid code block.
                 continue;
-            } if (enableFlowchart && code.classList.contains('language-flowchart')) {
+            } else if (enableFlowchart
+                       && (code.classList.contains('language-flowchart')
+                           || code.classList.contains('language-flow'))) {
                 // Flowchart code block.
+                continue;
+            } else if (enableMathJax && code.classList.contains('language-mathjax')) {
+                // MathJax code block.
+                continue;
+            } else if (enablePlantUML && code.classList.contains('language-puml')) {
+                // PlantUML code block.
+                continue;
+            } else if (enableGraphviz && code.classList.contains('language-dot')) {
+                // Graphviz code block.
                 continue;
             }
 
@@ -70,14 +85,29 @@ var highlightCodeBlocks = function(doc, enableMermaid, enableFlowchart) {
 };
 
 var updateText = function(text) {
+    if (VAddTOC) {
+        text = "[TOC]\n\n" + text;
+    }
+
+    // There is at least one async job for MathJax.
+    asyncJobsCount = 1;
+
     var needToc = mdHasTocSection(text);
     var html = markdownToHtml(text, needToc);
-    placeholder.innerHTML = html;
+    contentDiv.innerHTML = html;
     handleToc(needToc);
     insertImageCaption();
-    highlightCodeBlocks(document, VEnableMermaid, VEnableFlowchart);
+    setupImageView();
+    highlightCodeBlocks(document,
+                        VEnableMermaid,
+                        VEnableFlowchart,
+                        VEnableMathjax,
+                        VPlantUMLMode != 0,
+                        VEnableGraphviz);
     renderMermaid('language-mermaid');
-    renderFlowchart('language-flowchart');
+    renderFlowchart(['language-flowchart', 'language-flow']);
+    renderPlantUML('language-puml');
+    renderGraphviz('language-dot');
     addClassToCodeBlock();
     renderCodeBlockLineNumber();
 
@@ -85,13 +115,13 @@ var updateText = function(text) {
     // finishLoading logic.
     if (VEnableMathjax) {
         try {
-            MathJax.Hub.Queue(["Typeset", MathJax.Hub, placeholder, finishLogics]);
+            MathJax.Hub.Queue(["Typeset", MathJax.Hub, contentDiv, postProcessMathJax]);
         } catch (err) {
             content.setLog("err: " + err);
-            finishLogics();
+            finishOneAsyncJob();
         }
     } else {
-        finishLogics();
+        finishOneAsyncJob();
     }
 };
 
@@ -100,7 +130,7 @@ var highlightText = function(text, id, timeStamp) {
 
     var parser = new DOMParser();
     var htmlDoc = parser.parseFromString("<div id=\"showdown-container\">" + html + "</div>", 'text/html');
-    highlightCodeBlocks(htmlDoc, false, false);
+    highlightCodeBlocks(htmlDoc, false, false, false, false, false);
 
     html = htmlDoc.getElementById('showdown-container').innerHTML;
 
@@ -109,23 +139,23 @@ var highlightText = function(text, id, timeStamp) {
     content.highlightTextCB(html, id, timeStamp);
 }
 
-var textToHtml = function(text) {
+var textToHtml = function(identifier, id, timeStamp, text, inlineStyle) {
     var html = renderer.makeHtml(text);
 
     var parser = new DOMParser();
     var htmlDoc = parser.parseFromString("<div id=\"showdown-container\">" + html + "</div>", 'text/html');
-    highlightCodeBlocks(htmlDoc, false, false);
+    highlightCodeBlocks(htmlDoc, false, false, false, false, false);
 
     html = htmlDoc.getElementById('showdown-container').innerHTML;
 
     delete parser;
 
-    var container = document.getElementById('text-to-html-div');
-    container.innerHTML = html;
+    if (inlineStyle) {
+        var container = textHtmlDiv;
+        container.innerHTML = html;
+        html = getHtmlWithInlineStyles(container);
+        container.innerHTML = "";
+    }
 
-    html = getHtmlWithInlineStyles(container);
-
-    container.innerHTML = "";
-
-    content.textToHtmlCB(text, html);
+    content.textToHtmlCB(identifier, id, timeStamp, html);
 }

@@ -37,7 +37,8 @@ void VUpdater::setupUI()
 
     m_descriptionWV = VUtils::getWebEngineView();
     m_descriptionWV->setContextMenuPolicy(Qt::NoContextMenu);
-    m_descriptionWV->setHtml(VUtils::generateSimpleHtmlTemplate(VNote::s_sloganTemplate));
+    m_descriptionWV->setHtml(VUtils::generateSimpleHtmlTemplate(VNote::s_sloganTemplate),
+                             QUrl("qrc:/resources"));
 
     m_btnBox = new QDialogButtonBox(QDialogButtonBox::Ok);
     m_btnBox->button(QDialogButtonBox::Ok)->setProperty("SpecialBtn", true);
@@ -63,10 +64,7 @@ void VUpdater::setupUI()
     m_proLabel->hide();
     m_proBar->hide();
 
-    m_descriptionWV->setMaximumSize(600, 400);
-
     setLayout(mainLayout);
-    mainLayout->setSizeConstraint(QLayout::SetFixedSize);
     setWindowTitle(tr("VNote Update"));
 }
 
@@ -180,6 +178,6 @@ void VUpdater::parseResult(const QByteArray &p_data)
                                             g_config->getMarkdownExtensions(),
                                             toc);
     html = VUtils::generateSimpleHtmlTemplate(html);
-    m_descriptionWV->setHtml(html);
+    m_descriptionWV->setHtml(html, QUrl("qrc:/resources"));
     m_proBar->hide();
 }

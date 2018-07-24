@@ -15,8 +15,12 @@ public:
     // @p_file could be NULL.
     explicit VWebView(VFile *p_file, QWidget *p_parent = Q_NULLPTR);
 
+    void setInPreview(bool p_preview);
+
 signals:
     void editNote();
+
+    void requestSavePage();
 
 protected:
     void contextMenuEvent(QContextMenuEvent *p_event);
@@ -26,9 +30,9 @@ private slots:
 
     void handleCopyImageUrlAction();
 
-    void handleCopyWithoutBackgroundAction();
+    void handleCopyAsAction(QAction *p_act);
 
-    void handleCopyAllWithoutBackgroundAction();
+    void handleCopyAllAsAction(QAction *p_act);
 
     // Copy the clicked image.
     // Used to replace the default CopyImageToClipboard action.
@@ -41,24 +45,34 @@ private:
 
     void alterHtmlMimeData(QClipboard *p_clipboard,
                            const QMimeData *p_mimeData,
-                           bool p_removeBackground);
+                           const QString &p_copyTarget);
 
     void removeHtmlFromImageData(QClipboard *p_clipboard,
                                  const QMimeData *p_mimeData);
 
     bool removeStyles(QString &p_html);
 
+    void initCopyAsMenu(QAction *p_after, QMenu *p_menu);
+
+    void initCopyAllAsMenu(QMenu *p_menu);
+
     VFile *m_file;
 
     // Whether this view has hooked the Copy Image Url action.
     bool m_copyImageUrlActionHooked;
 
-    bool m_needRemoveBackground;
-
-    bool m_fixImgSrc;
-
     // Whether it is after copy image action.
     bool m_afterCopyImage;
+
+    // Target of Copy As.
+    QString m_copyTarget;
+
+    // Whether in preview mode.
+    bool m_inPreview;
 };
 
+inline void VWebView::setInPreview(bool p_preview)
+{
+    m_inPreview = p_preview;
+}
 #endif // VWEBVIEW_H

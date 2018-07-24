@@ -24,22 +24,29 @@
 #include <QComboBox>
 #include <QStyledItemDelegate>
 #include <QWebEngineView>
+#include <QAction>
+#include <QTreeWidgetItem>
+#include <QFormLayout>
+#include <QInputDialog>
 
 #include "vorphanfile.h"
 #include "vnote.h"
 #include "vnotebook.h"
-#include "hgmarkdownhighlighter.h"
 #include "vpreviewpage.h"
+#include "pegparser.h"
 
 extern VConfigManager *g_config;
 
 QVector<QPair<QString, QString>> VUtils::s_availableLanguages;
 
-const QString VUtils::c_imageLinkRegExp = QString("\\!\\[([^\\]]*)\\]\\(([^\\)\"]+)\\s*(\"(\\\\.|[^\"\\)])*\")?\\s*\\)");
+const QString VUtils::c_imageLinkRegExp = QString("\\!\\[([^\\]]*)\\]\\(([^\\)\"'\\s]+)\\s*"
+                                                  "((\"[^\"\\)\\n]*\")|('[^'\\)\\n]*'))?\\s*"
+                                                  "(=(\\d*)x(\\d*))?\\s*"
+                                                  "\\)");
 
 const QString VUtils::c_imageTitleRegExp = QString("[\\w\\(\\)@#%\\*\\-\\+=\\?<>\\,\\.\\s]*");
 
-const QString VUtils::c_fileNameRegExp = QString("[^\\\\/:\\*\\?\"<>\\|]*");
+const QString VUtils::c_fileNameRegExp = QString("(?:[^\\\\/:\\*\\?\"<>\\|\\s]| )*");
 
 const QString VUtils::c_fencedCodeBlockStartRegExp = QString("^(\\s*)```([^`\\s]*)\\s*[^`]*$");
 
@@ -74,17 +81,32 @@ QString VUtils::readFileFromDisk(const QString &filePath)
     return fileText;
 }
 
-bool VUtils::writeFileToDisk(const QString &filePath, const QString &text)
+bool VUtils::writeFileToDisk(const QString &p_filePath, const QString &p_text)
 {
-    QFile file(filePath);
+    QFile file(p_filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qWarning() << "fail to open file" << filePath << "to write";
+        qWarning() << "fail to open file" << p_filePath << "to write";
         return false;
     }
+
     QTextStream stream(&file);
-    stream << text;
+    stream << p_text;
     file.close();
-    qDebug() << "write file content:" << filePath;
+    qDebug() << "write file content:" << p_filePath;
+    return true;
+}
+
+bool VUtils::writeFileToDisk(const QString &p_filePath, const QByteArray &p_data)
+{
+    QFile file(p_filePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "fail to open file" << p_filePath << "to write";
+        return false;
+    }
+
+    file.write(p_data);
+    file.close();
+    qDebug() << "write file content:" << p_filePath;
     return true;
 }
 
@@ -129,13 +151,16 @@ QString VUtils::generateImageFileName(const QString &path,
     // Constrain the length of the name.
     baseName.truncate(10);
 
+    baseName.prepend(g_config->getImageNamePrefix());
+
     if (!baseName.isEmpty()) {
-        baseName.prepend('_');
+        baseName.append('_');
     }
 
     // Add current time and random number to make the name be most likely unique
-    baseName = baseName + '_' + QString::number(QDateTime::currentDateTime().toTime_t());
-    baseName = baseName + '_' + QString::number(qrand());
+    baseName += QString::number(QDateTime::currentDateTime().toTime_t())
+                + '_'
+                + QString::number(qrand());
 
     QDir dir(path);
     QString imageName = baseName + "." + format.toLower();
@@ -147,15 +172,6 @@ QString VUtils::generateImageFileName(const QString &path,
     }
 
     return imageName;
-}
-
-void VUtils::processStyle(QString &style, const QVector<QPair<QString, QString> > &varMap)
-{
-    // Process style
-    for (int i = 0; i < varMap.size(); ++i) {
-        const QPair<QString, QString> &map = varMap[i];
-        style.replace("@" + map.first, map.second);
-    }
 }
 
 QString VUtils::fileNameFromPath(const QString &p_path)
@@ -515,13 +531,21 @@ bool VUtils::isImageURLText(const QString &p_url)
 
 qreal VUtils::calculateScaleFactor()
 {
-    // const qreal refHeight = 1152;
-    // const qreal refWidth = 2048;
-    const qreal refDpi = 96;
+    static qreal factor = -1;
 
-    qreal dpi = QGuiApplication::primaryScreen()->logicalDotsPerInch();
-    qreal factor = dpi / refDpi;
-    return factor < 1 ? 1 : factor;
+    if (factor < 0) {
+        const qreal refDpi = 96;
+        qreal dpi = QGuiApplication::primaryScreen()->logicalDotsPerInch();
+        factor = dpi / refDpi;
+        if (factor < 1) {
+            factor = 1;
+        } else {
+            // Keep only two digits after the dot.
+            factor = (int)(factor * 100) / 100.0;
+        }
+    }
+
+    return factor;
 }
 
 bool VUtils::realEqual(qreal p_a, qreal p_b)
@@ -581,12 +605,41 @@ DocType VUtils::docTypeFromName(const QString &p_name)
 
 QString VUtils::generateSimpleHtmlTemplate(const QString &p_body)
 {
-    QString html = VNote::s_simpleHtmlTemplate;
+    QString html(VNote::s_simpleHtmlTemplate);
     return html.replace(HtmlHolder::c_bodyHolder, p_body);
 }
 
-QString VUtils::generateHtmlTemplate(MarkdownConverterType p_conType, bool p_exportPdf)
+QString VUtils::generateHtmlTemplate(MarkdownConverterType p_conType)
 {
+    return generateHtmlTemplate(VNote::s_markdownTemplate, p_conType);
+}
+
+QString VUtils::generateHtmlTemplate(MarkdownConverterType p_conType,
+                                     const QString &p_renderBg,
+                                     const QString &p_renderStyle,
+                                     const QString &p_renderCodeBlockStyle,
+                                     bool p_isPDF,
+                                     bool p_wkhtmltopdf,
+                                     bool p_addToc)
+{
+    Q_ASSERT((p_isPDF && p_wkhtmltopdf) || !p_wkhtmltopdf);
+
+    QString templ = VNote::generateHtmlTemplate(g_config->getRenderBackgroundColor(p_renderBg),
+                                                g_config->getCssStyleUrl(p_renderStyle),
+                                                g_config->getCodeBlockCssStyleUrl(p_renderCodeBlockStyle),
+                                                p_isPDF);
+
+    return generateHtmlTemplate(templ, p_conType, p_isPDF, p_wkhtmltopdf, p_addToc);
+}
+
+QString VUtils::generateHtmlTemplate(const QString &p_template,
+                                     MarkdownConverterType p_conType,
+                                     bool p_isPDF,
+                                     bool p_wkhtmltopdf,
+                                     bool p_addToc)
+{
+    bool mathjaxTypeSetOnLoad = true;
+
     QString jsFile, extraFile;
     switch (p_conType) {
     case MarkdownConverterType::Marked:
@@ -606,20 +659,50 @@ QString VUtils::generateHtmlTemplate(MarkdownConverterType p_conType, bool p_exp
         extraFile = "<script src=\"qrc" + VNote::c_markdownitExtraFile + "\"></script>\n" +
                     "<script src=\"qrc" + VNote::c_markdownitAnchorExtraFile + "\"></script>\n" +
                     "<script src=\"qrc" + VNote::c_markdownitTaskListExtraFile + "\"></script>\n" +
-                    /*
-                    "<script src=\"qrc" + VNote::c_markdownitSubExtraFile + "\"></script>\n" +
-                    "<script src=\"qrc" + VNote::c_markdownitSupExtraFile + "\"></script>\n" +
-                    */
+                    "<script src=\"qrc" + VNote::c_markdownitImsizeExtraFile + "\"></script>\n" +
                     "<script src=\"qrc" + VNote::c_markdownitFootnoteExtraFile + "\"></script>\n";
 
-        MarkdownitOption opt = g_config->getMarkdownitOption();
+        if (g_config->getEnableMathjax()) {
+            extraFile += "<script src=\"qrc" + VNote::c_markdownitTexMathExtraFile + "\"></script>\n";
+        }
+
+        const MarkdownitOption &opt = g_config->getMarkdownitOption();
+
+        if (opt.m_sup) {
+            extraFile += "<script src=\"qrc" + VNote::c_markdownitSupExtraFile + "\"></script>\n";
+        }
+
+        if (opt.m_sub) {
+            extraFile += "<script src=\"qrc" + VNote::c_markdownitSubExtraFile + "\"></script>\n";
+        }
+
+        if (opt.m_metadata) {
+            extraFile += "<script src=\"qrc" + VNote::c_markdownitFrontMatterExtraFile + "\"></script>\n";
+        }
+
+        if (opt.m_emoji) {
+            extraFile += "<script src=\"qrc" + VNote::c_markdownitEmojiExtraFile + "\"></script>\n";
+        }
+
         QString optJs = QString("<script>var VMarkdownitOption = {"
-                                "html: %1, breaks: %2, linkify: %3};"
+                                "html: %1,\n"
+                                "breaks: %2,\n"
+                                "linkify: %3,\n"
+                                "sub: %4,\n"
+                                "sup: %5,\n"
+                                "metadata: %6,\n"
+                                "emoji: %7 };\n"
                                 "</script>\n")
-                               .arg(opt.m_html ? "true" : "false")
-                               .arg(opt.m_breaks ? "true" : "false")
-                               .arg(opt.m_linkify ? "true" : "false");
+                               .arg(opt.m_html ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_breaks ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_linkify ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_sub ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_sup ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_metadata ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_emoji ? QStringLiteral("true") : QStringLiteral("false"));
         extraFile += optJs;
+
+        mathjaxTypeSetOnLoad = false;
         break;
     }
 
@@ -635,7 +718,7 @@ QString VUtils::generateHtmlTemplate(MarkdownConverterType p_conType, bool p_exp
     }
 
     if (g_config->getEnableMermaid()) {
-        extraFile += "<link rel=\"stylesheet\" type=\"text/css\" href=\"qrc" + VNote::c_mermaidCssFile + "\"/>\n" +
+        extraFile += "<link rel=\"stylesheet\" type=\"text/css\" href=\"" + g_config->getMermaidCssStyleUrl() + "\"/>\n" +
                      "<script src=\"qrc" + VNote::c_mermaidApiJsFile + "\"></script>\n" +
                      "<script>var VEnableMermaid = true;</script>\n";
     }
@@ -647,14 +730,54 @@ QString VUtils::generateHtmlTemplate(MarkdownConverterType p_conType, bool p_exp
     }
 
     if (g_config->getEnableMathjax()) {
+        QString mj = g_config->getMathjaxJavascript();
+        if (p_wkhtmltopdf) {
+            // Chante MathJax to be rendered as SVG.
+            // If rendered as HTML, it will make the font of <code> messy.
+            QRegExp reg("(Mathjax\\.js\\?config=)\\S+", Qt::CaseInsensitive);
+            mj.replace(reg, QString("\\1%1").arg("TeX-MML-AM_SVG"));
+        }
+
         extraFile += "<script type=\"text/x-mathjax-config\">"
                      "MathJax.Hub.Config({\n"
-                     "                    tex2jax: {inlineMath: [['$','$'], ['\\\\(','\\\\)']]},\n"
+                     "                    tex2jax: {inlineMath: [['$','$'], ['\\\\(','\\\\)']],\n"
+                                                    "processEscapes: true,\n"
+                                                    "processClass: \"tex2jax_process|language-mathjax|lang-mathjax\"},\n"
                      "                    showProcessingMessages: false,\n"
+                     "                    skipStartupTypeset: " + QString("%1,\n").arg(mathjaxTypeSetOnLoad ? "false" : "true") +
                      "                    messageStyle: \"none\"});\n"
+                     "MathJax.Hub.Register.StartupHook(\"End\", function() { handleMathjaxReady(); });\n"
                      "</script>\n"
-                     "<script type=\"text/javascript\" async src=\"" + g_config->getMathjaxJavascript() + "\"></script>\n" +
+                     "<script type=\"text/javascript\" async src=\"" + mj + "\"></script>\n" +
                      "<script>var VEnableMathjax = true;</script>\n";
+
+        if (p_wkhtmltopdf) {
+            extraFile += "<script>var VRemoveMathjaxScript = true;</script>\n";
+        }
+    }
+
+    int plantUMLMode = g_config->getPlantUMLMode();
+    if (plantUMLMode != PlantUMLMode::DisablePlantUML) {
+        if (plantUMLMode == PlantUMLMode::OnlinePlantUML) {
+            extraFile += "<script type=\"text/javascript\" src=\"" + VNote::c_plantUMLJsFile + "\"></script>\n" +
+                         "<script type=\"text/javascript\" src=\"" + VNote::c_plantUMLZopfliJsFile + "\"></script>\n" +
+                         "<script>var VPlantUMLServer = '" + g_config->getPlantUMLServer() + "';</script>\n";
+        }
+
+        extraFile += QString("<script>var VPlantUMLMode = %1;</script>\n").arg(plantUMLMode);
+
+        QString format = p_isPDF ? "png" : "svg";
+        extraFile += QString("<script>var VPlantUMLFormat = '%1';</script>\n").arg(format);
+    }
+
+    if (g_config->getEnableGraphviz()) {
+        extraFile += "<script>var VEnableGraphviz = true;</script>\n";
+
+        // If we use png, we need to specify proper font in the dot command to render
+        // non-ASCII chars properly.
+        // Hence we use svg format in both cases.
+        QString format = p_isPDF ? "svg" : "svg";
+        extraFile += QString("<script>var VGraphvizFormat = '%1';</script>\n").arg(format);
     }
 
     if (g_config->getEnableImageCaption()) {
@@ -666,21 +789,116 @@ QString VUtils::generateHtmlTemplate(MarkdownConverterType p_conType, bool p_exp
                      "<script>var VEnableHighlightLineNumber = true;</script>\n";
     }
 
-    extraFile += "<script>var VStylesToInline = '" + g_config->getStylesToInlineWhenCopied() + "';</script>\n";
-
-    QString htmlTemplate;
-    if (p_exportPdf) {
-        htmlTemplate = VNote::s_markdownTemplatePDF;
-    } else {
-        htmlTemplate = VNote::s_markdownTemplate;
+    if (g_config->getEnableFlashAnchor()) {
+        extraFile += "<script>var VEnableFlashAnchor = true;</script>\n";
     }
 
+    if (p_addToc) {
+        extraFile += "<script>var VAddTOC = true;</script>\n";
+        extraFile += "<style type=\"text/css\">\n"
+                     "    @media print {\n"
+                     "        .vnote-toc {\n"
+                     "            page-break-after: always;\n"
+                     "         }\n"
+                     "    }\n"
+                     "</style>";
+    }
+
+    extraFile += "<script>var VStylesToInline = '" + g_config->getStylesToInlineWhenCopied() + "';</script>\n";
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    extraFile += "<script>var VOS = 'mac';</script>\n";
+#elif defined(Q_OS_WIN)
+    extraFile += "<script>var VOS = 'win';</script>\n";
+#else
+    extraFile += "<script>var VOS = 'linux';</script>\n";
+#endif
+
+    QString htmlTemplate(p_template);
     htmlTemplate.replace(HtmlHolder::c_JSHolder, jsFile);
     if (!extraFile.isEmpty()) {
         htmlTemplate.replace(HtmlHolder::c_extraHolder, extraFile);
     }
 
     return htmlTemplate;
+}
+
+QString VUtils::generateExportHtmlTemplate(const QString &p_renderBg, bool p_includeMathJax)
+{
+    QString templ = VNote::generateExportHtmlTemplate(g_config->getRenderBackgroundColor(p_renderBg));
+    QString extra;
+    if (p_includeMathJax) {
+        extra += "<script type=\"text/x-mathjax-config\">\n"
+                         "MathJax.Hub.Config({\n"
+                             "showProcessingMessages: false,\n"
+                             "messageStyle: \"none\",\n"
+                             "SVG: {\n"
+                                 "minScaleAdjust: 100,\n"
+                                 "styles: {\n"
+/*
+FIXME: Using wkhtmltopdf, without 2em, the math formula will be very small. However,
+with 2em, if there are Chinese characters in it, the font will be a mess.
+*/
+#if defined(Q_OS_WIN)
+                                   "\".MathJax_SVG\": {\n"
+                                        "\"font-size\": \"2em !important\"\n"
+                                   "}\n"
+#endif
+                                 "}\n"
+                             "}\n"
+                         "});\n"
+                 "</script>\n";
+
+        QString mj = g_config->getMathjaxJavascript();
+        // Chante MathJax to be rendered as SVG.
+        QRegExp reg("(Mathjax\\.js\\?config=)\\S+", Qt::CaseInsensitive);
+        mj.replace(reg, QString("\\1%1").arg("TeX-MML-AM_SVG"));
+
+        extra += "<script type=\"text/javascript\" async src=\"" + mj + "\"></script>\n";
+    }
+
+    if (!extra.isEmpty()) {
+        templ.replace(HtmlHolder::c_extraHolder, extra);
+    }
+
+    return templ;
+}
+
+QString VUtils::generateMathJaxPreviewTemplate()
+{
+    QString templ = VNote::generateMathJaxPreviewTemplate();
+    templ.replace(HtmlHolder::c_JSHolder, g_config->getMathjaxJavascript());
+
+    QString extraFile;
+
+    QString mathjaxScale = QString::number((int)(100 * VUtils::calculateScaleFactor()));
+
+    /*
+    // Mermaid.
+    extraFile += "<link rel=\"stylesheet\" type=\"text/css\" href=\"" + g_config->getMermaidCssStyleUrl() + "\"/>\n" +
+                 "<script src=\"qrc" + VNote::c_mermaidApiJsFile + "\"></script>\n";
+    */
+
+    // Flowchart.
+    extraFile += "<script src=\"qrc" + VNote::c_raphaelJsFile + "\"></script>\n" +
+                 "<script src=\"qrc" + VNote::c_flowchartJsFile + "\"></script>\n";
+
+    // MathJax.
+    extraFile += "<script type=\"text/x-mathjax-config\">"
+                 "MathJax.Hub.Config({\n"
+                 "                    tex2jax: {inlineMath: [['$','$'], ['\\\\(','\\\\)']],\n"
+                                               "processEscapes: true,\n"
+                                               "processClass: \"tex2jax_process|language-mathjax|lang-mathjax\"},\n"
+                 "                    \"HTML-CSS\": {\n"
+                 "                                   scale: " + mathjaxScale + "\n"
+                 "                                  },\n"
+                 "                    showProcessingMessages: false,\n"
+                 "                    messageStyle: \"none\"});\n"
+                 "</script>\n";
+
+    templ.replace(HtmlHolder::c_extraHolder, extraFile);
+
+    return templ;
 }
 
 QString VUtils::getFileNameWithSequence(const QString &p_directory,
@@ -843,8 +1061,6 @@ bool VUtils::splitPathInBasePath(const QString &p_base,
     }
 
     p_parts = b.right(b.size() - a.size() - 1).split("/", QString::SkipEmptyParts);
-
-    qDebug() << QString("split path %1 based on %2 to %3 parts").arg(p_path).arg(p_base).arg(p_parts.size());
     return true;
 }
 
@@ -874,6 +1090,16 @@ bool VUtils::deleteDirectory(const VNotebook *p_notebook,
         // Move it to the recycle bin folder.
         return deleteFile(p_notebook->getRecycleBinFolderPath(), p_path);
     }
+}
+
+bool VUtils::deleteDirectory(const QString &p_path)
+{
+    if (p_path.isEmpty()) {
+        return true;
+    }
+
+    QDir dir(p_path);
+    return dir.removeRecursively();
 }
 
 bool VUtils::emptyDirectory(const VNotebook *p_notebook,
@@ -977,44 +1203,20 @@ bool VUtils::deleteFile(const QString &p_recycleBinFolderPath,
 QVector<VElementRegion> VUtils::fetchImageRegionsUsingParser(const QString &p_content)
 {
     Q_ASSERT(!p_content.isEmpty());
-    QVector<VElementRegion> regs;
 
-    QByteArray ba = p_content.toUtf8();
-    const char *data = (const char *)ba.data();
-    int len = ba.size();
+    const QSharedPointer<PegParseConfig> parserConfig(new PegParseConfig());
+    parserConfig->m_data = p_content.toUtf8();
 
-    pmh_element **result = NULL;
-    char *content = new char[len + 1];
-    memcpy(content, data, len);
-    content[len] = '\0';
-
-    pmh_markdown_to_elements(content, pmh_EXT_NONE, &result);
-
-    if (!result) {
-        return regs;
-    }
-
-    pmh_element *elem = result[pmh_IMAGE];
-    while (elem != NULL) {
-        if (elem->end <= elem->pos) {
-            elem = elem->next;
-            continue;
-        }
-
-        regs.push_back(VElementRegion(elem->pos, elem->end));
-
-        elem = elem->next;
-    }
-
-    pmh_free_elements(result);
-
-    return regs;
+    return PegParser::parseImageRegions(parserConfig);
 }
 
-QString VUtils::displayDateTime(const QDateTime &p_dateTime)
+QString VUtils::displayDateTime(const QDateTime &p_dateTime,
+                                bool p_uniformNum)
 {
-    QString res = p_dateTime.date().toString(Qt::DefaultLocaleLongDate);
-    res += " " + p_dateTime.time().toString();
+    QString res = p_dateTime.date().toString(p_uniformNum ? Qt::ISODate
+                                                          : Qt::DefaultLocaleLongDate);
+    res += " " + p_dateTime.time().toString(p_uniformNum ? Qt::ISODate
+                                                         : Qt::TextDate);
     return res;
 }
 
@@ -1053,6 +1255,10 @@ QStringList VUtils::filterFilePathsToOpen(const QStringList &p_files)
 {
     QStringList paths;
     for (int i = 0; i < p_files.size(); ++i) {
+        if (p_files[i].startsWith('-')) {
+            continue;
+        }
+
         QString path = validFilePathToOpen(p_files[i]);
         if (!path.isEmpty()) {
             paths.append(path);
@@ -1131,9 +1337,9 @@ QWebEngineView *VUtils::getWebEngineView(QWidget *p_parent)
     return viewer;
 }
 
-QString VUtils::getFileNameWithLocale(const QString &p_name)
+QString VUtils::getFileNameWithLocale(const QString &p_name, const QString &p_locale)
 {
-    QString locale = getLocale();
+    QString locale = p_locale.isEmpty() ? getLocale() : p_locale;
     locale = locale.split('_')[0];
 
     QFileInfo fi(p_name);
@@ -1150,5 +1356,267 @@ QString VUtils::getFileNameWithLocale(const QString &p_name)
 QString VUtils::getDocFile(const QString &p_name)
 {
     QDir dir(VNote::c_docFileFolder);
-    return dir.filePath(getFileNameWithLocale(p_name));
+    QString name(getFileNameWithLocale(p_name));
+    if (!dir.exists(name)) {
+        name = getFileNameWithLocale(p_name, "en_US");
+    }
+
+    return dir.filePath(name);
+}
+
+QString VUtils::getCaptainShortcutSequenceText(const QString &p_operation)
+{
+    QString capKey = g_config->getShortcutKeySequence("CaptainMode");
+    QString sec = g_config->getCaptainShortcutKeySequence(p_operation);
+
+    QKeySequence seq(capKey + "," + sec);
+    if (!seq.isEmpty()) {
+        return seq.toString(QKeySequence::NativeText);
+    }
+
+    return QString();
+}
+
+QString VUtils::getAvailableFontFamily(const QStringList &p_families)
+{
+    QStringList availFamilies = QFontDatabase().families();
+
+    for (int i = 0; i < p_families.size(); ++i) {
+        QString family = p_families[i].trimmed();
+        if (family.isEmpty()) {
+            continue;
+        }
+
+        for (int j = 0; j < availFamilies.size(); ++j) {
+            QString availFamily = availFamilies[j];
+            availFamily.remove(QRegExp("\\[.*\\]"));
+            availFamily = availFamily.trimmed();
+            if (family == availFamily
+                || family.toLower() == availFamily.toLower()) {
+                qDebug() << "matched font family" << availFamilies[j];
+                return availFamilies[j];
+            }
+        }
+    }
+
+    return QString();
+}
+
+bool VUtils::fixTextWithShortcut(QAction *p_act, const QString &p_shortcut)
+{
+    QString keySeq = g_config->getShortcutKeySequence(p_shortcut);
+    if (!keySeq.isEmpty()) {
+        p_act->setText(QString("%1\t%2").arg(p_act->text()).arg(VUtils::getShortcutText(keySeq)));
+        return true;
+    }
+
+    return false;
+}
+
+bool VUtils::fixTextWithCaptainShortcut(QAction *p_act, const QString &p_shortcut)
+{
+    QString keyText = VUtils::getCaptainShortcutSequenceText(p_shortcut);
+    if (!keyText.isEmpty()) {
+        p_act->setText(QString("%1\t%2").arg(p_act->text()).arg(keyText));
+        return true;
+    }
+
+    return false;
+}
+
+QStringList VUtils::parseCombinedArgString(const QString &p_program)
+{
+    QStringList args;
+    QString tmp;
+    int quoteCount = 0;
+    bool inQuote = false;
+
+    // handle quoting. tokens can be surrounded by double quotes
+    // "hello world". three consecutive double quotes represent
+    // the quote character itself.
+    for (int i = 0; i < p_program.size(); ++i) {
+        if (p_program.at(i) == QLatin1Char('"')) {
+            ++quoteCount;
+            if (quoteCount == 3) {
+                // third consecutive quote
+                quoteCount = 0;
+                tmp += p_program.at(i);
+            }
+
+            continue;
+        }
+
+        if (quoteCount) {
+            if (quoteCount == 1) {
+                inQuote = !inQuote;
+            }
+
+            quoteCount = 0;
+        }
+
+        if (!inQuote && p_program.at(i).isSpace()) {
+            if (!tmp.isEmpty()) {
+                args += tmp;
+                tmp.clear();
+            }
+        } else {
+            tmp += p_program.at(i);
+        }
+    }
+
+    if (!tmp.isEmpty()) {
+        args += tmp;
+    }
+
+    return args;
+}
+
+const QTreeWidgetItem *VUtils::topLevelTreeItem(const QTreeWidgetItem *p_item)
+{
+    if (!p_item) {
+        return NULL;
+    }
+
+    if (p_item->parent()) {
+        return p_item->parent();
+    } else {
+        return p_item;
+    }
+}
+
+QImage VUtils::imageFromFile(const QString &p_filePath)
+{
+    QImage img;
+    QFile file(p_filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "fail to open image file" << p_filePath;
+        return img;
+    }
+
+    img.loadFromData(file.readAll());
+    qDebug() << "imageFromFile" << p_filePath << img.isNull() << img.format();
+    return img;
+}
+
+QPixmap VUtils::pixmapFromFile(const QString &p_filePath)
+{
+    QPixmap pixmap;
+    QFile file(p_filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "fail to open pixmap file" << p_filePath;
+        return pixmap;
+    }
+
+    pixmap.loadFromData(file.readAll());
+    qDebug() << "pixmapFromFile" << p_filePath << pixmap.isNull();
+    return pixmap;
+}
+
+QFormLayout *VUtils::getFormLayout()
+{
+    QFormLayout *layout = new QFormLayout();
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    layout->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+#endif
+
+    return layout;
+}
+
+bool VUtils::inSameDrive(const QString &p_a, const QString &p_b)
+{
+#if defined(Q_OS_WIN)
+    QChar sep(':');
+    int ai = p_a.indexOf(sep);
+    int bi = p_b.indexOf(sep);
+
+    if (ai == -1 || bi == -1) {
+        return false;
+    }
+
+    return p_a.left(ai).toLower() == p_b.left(bi).toLower();
+#else
+    return true;
+#endif
+}
+
+QString VUtils::promptForFileName(const QString &p_title,
+                                  const QString &p_label,
+                                  const QString &p_default,
+                                  const QString &p_dir,
+                                  QWidget *p_parent)
+{
+    QString name = p_default;
+    QString text = p_label;
+    QDir paDir(p_dir);
+    while (true) {
+        bool ok;
+        name = QInputDialog::getText(p_parent,
+                                     p_title,
+                                     text,
+                                     QLineEdit::Normal,
+                                     name,
+                                     &ok);
+        if (!ok || name.isEmpty()) {
+            return "";
+        }
+
+        if (!VUtils::checkFileNameLegal(name)) {
+            text = QObject::tr("Illegal name. Please try again:");
+            continue;
+        }
+
+        if (paDir.exists(name)) {
+            text = QObject::tr("Name already exists. Please try again:");
+            continue;
+        }
+
+        break;
+    }
+
+    return name;
+}
+
+QString VUtils::promptForFileName(const QString &p_title,
+                                  const QString &p_label,
+                                  const QString &p_default,
+                                  std::function<bool(const QString &p_name)> p_checkExistsFunc,
+                                  QWidget *p_parent)
+{
+    QString name = p_default;
+    QString text = p_label;
+    while (true) {
+        bool ok;
+        name = QInputDialog::getText(p_parent,
+                                     p_title,
+                                     text,
+                                     QLineEdit::Normal,
+                                     name,
+                                     &ok);
+        if (!ok || name.isEmpty()) {
+            return "";
+        }
+
+        if (!VUtils::checkFileNameLegal(name)) {
+            text = QObject::tr("Illegal name. Please try again:");
+            continue;
+        }
+
+        if (p_checkExistsFunc(name)) {
+            text = QObject::tr("Name already exists. Please try again:");
+            continue;
+        }
+
+        break;
+    }
+
+    return name;
+}
+
+bool VUtils::onlyHasImgInHtml(const QString &p_html)
+{
+    // Tricky.
+    QRegExp reg("<(?:p|span|div) ");
+    return !p_html.contains(reg);
 }

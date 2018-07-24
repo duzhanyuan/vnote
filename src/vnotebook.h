@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QDateTime>
+#include <QStringList>
 
 class VDirectory;
 class VFile;
@@ -44,11 +45,24 @@ public:
     VDirectory *tryLoadDirectory(const QString &p_path);
 
     const QString &getName() const;
+
     const QString &getPath() const;
+
+    const QString &getPathInConfig() const;
+
+    void updatePath(const QString &p_path);
 
     VDirectory *getRootDir() const;
 
     void rename(const QString &p_name);
+
+    const QStringList &getTags() const;
+
+    bool addTag(const QString &p_tag);
+
+    void removeTag(const QString &p_tag);
+
+    bool hasTag(const QString &p_tag) const;
 
     static VNotebook *createNotebook(const QString &p_name,
                                      const QString &p_path,
@@ -95,6 +109,8 @@ public:
 
     bool isValid() const;
 
+    QList<QString> collectFiles();
+
 private:
     // Serialize current instance to json.
     QJsonObject toConfigJson() const;
@@ -102,8 +118,15 @@ private:
     // Write current instance to config file.
     bool writeToConfig() const;
 
+    void setPath(const QString &p_path);
+
     QString m_name;
+
     QString m_path;
+
+    // Path in vnote.ini.
+    // May be relative path to VNote's executable.
+    QString m_pathInConfig;
 
     // Folder name to store images.
     // If not empty, VNote will store images in this folder within the same directory of the note.
@@ -117,6 +140,10 @@ private:
     // Folder name to store deleted files.
     // Could be relative or absolute.
     QString m_recycleBinFolder;
+
+    // List of all the tags of notes.
+    // Used for index and auto-completion.
+    QStringList m_tags;
 
     // Parent is NULL for root directory
     VDirectory *m_rootDir;
@@ -141,4 +168,28 @@ inline bool VNotebook::isValid() const
     return m_valid;
 }
 
+inline const QString &VNotebook::getPath() const
+{
+    return m_path;
+}
+
+inline const QString &VNotebook::getPathInConfig() const
+{
+    return m_pathInConfig;
+}
+
+inline const QString &VNotebook::getName() const
+{
+    return m_name;
+}
+
+inline bool VNotebook::hasTag(const QString &p_tag) const
+{
+    return m_tags.contains(p_tag);
+}
+
+inline const QStringList &VNotebook::getTags() const
+{
+    return m_tags;
+}
 #endif // VNOTEBOOK_H

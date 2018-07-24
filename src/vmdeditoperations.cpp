@@ -12,6 +12,8 @@
 #include <QGuiApplication>
 #include <QApplication>
 #include <QClipboard>
+#include <QScrollBar>
+
 #include "vmdeditoperations.h"
 #include "dialog/vinsertimagedialog.h"
 #include "dialog/vselectdialog.h"
@@ -148,16 +150,16 @@ bool VMdEditOperations::insertImageFromURL(const QUrl &imageUrl)
     // Whether it is a local file or web URL
     if (isLocal) {
         imagePath = imageUrl.toLocalFile();
-        image = QImage(imagePath);
-
+        image = VUtils::imageFromFile(imagePath);
         if (image.isNull()) {
-            qWarning() << "image is null";
+            qWarning() << "inserted image is null" << imagePath;
             return false;
         }
-        title = "Insert Image From File";
+
+        title = tr("Insert Image From File");
     } else {
         imagePath = imageUrl.toString();
-        title = "Insert Image From Network";
+        title = tr("Insert Image From Network");
     }
 
 
@@ -333,7 +335,7 @@ bool VMdEditOperations::handleKeyPressEvent(QKeyEvent *p_event)
         break;
     }
 
-    case Qt::Key_K:
+    case Qt::Key_Semicolon:
     {
         if (modifiers == Qt::ControlModifier) {
             decorateInlineCode();
@@ -382,6 +384,7 @@ bool VMdEditOperations::handleKeyPressEvent(QKeyEvent *p_event)
 
     case Qt::Key_Enter:
         // Fall through.
+        V_FALLTHROUGH;
     case Qt::Key_Return:
     {
         if (handleKeyReturn(p_event)) {
@@ -397,6 +400,32 @@ bool VMdEditOperations::handleKeyPressEvent(QKeyEvent *p_event)
             decorateStrikethrough();
             p_event->accept();
             ret = true;
+        }
+
+        break;
+    }
+
+    case Qt::Key_J:
+    {
+        if (VUtils::isControlModifierForVim(modifiers)) {
+            // Scroll down without changing cursor.
+            QScrollBar *vbar = m_editor->verticalScrollBarW();
+            if (vbar && (vbar->minimum() != vbar->maximum())) {
+                vbar->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+            }
+        }
+
+        break;
+    }
+
+    case Qt::Key_K:
+    {
+        if (VUtils::isControlModifierForVim(modifiers)) {
+            // Scroll up without changing cursor.
+            QScrollBar *vbar = m_editor->verticalScrollBarW();
+            if (vbar && (vbar->minimum() != vbar->maximum())) {
+                vbar->triggerAction(QAbstractSlider::SliderSingleStepSub);
+            }
         }
 
         break;
@@ -1042,6 +1071,19 @@ bool VMdEditOperations::insertLink(const QString &p_linkText,
                                    const QString &p_linkUrl)
 {
     QString link = QString("[%1](%2)").arg(p_linkText).arg(p_linkUrl);
+    QTextCursor cursor = m_editor->textCursorW();
+    cursor.insertText(link);
+    m_editor->setTextCursorW(cursor);
+
+    setVimMode(VimMode::Insert);
+
+    return true;
+}
+
+bool VMdEditOperations::insertImageLink(const QString &p_linkText,
+                                        const QString &p_linkUrl)
+{
+    QString link = QString("![%1](%2)").arg(p_linkText).arg(p_linkUrl);
     QTextCursor cursor = m_editor->textCursorW();
     cursor.insertText(link);
     m_editor->setTextCursorW(cursor);

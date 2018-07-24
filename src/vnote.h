@@ -35,8 +35,6 @@ public:
 
     static QString s_markdownTemplate;
 
-    static QString s_markdownTemplatePDF;
-
     // Hoedown
     static const QString c_hoedownJsFile;
 
@@ -52,6 +50,10 @@ public:
     static const QString c_markdownitSubExtraFile;
     static const QString c_markdownitSupExtraFile;
     static const QString c_markdownitFootnoteExtraFile;
+    static const QString c_markdownitFrontMatterExtraFile;
+    static const QString c_markdownitImsizeExtraFile;
+    static const QString c_markdownitEmojiExtraFile;
+    static const QString c_markdownitTexMathExtraFile;
 
     // Showdown
     static const QString c_showdownJsFile;
@@ -60,13 +62,15 @@ public:
 
     // Mermaid
     static const QString c_mermaidApiJsFile;
-    static const QString c_mermaidCssFile;
-    static const QString c_mermaidDarkCssFile;
     static const QString c_mermaidForestCssFile;
 
     // flowchart.js
     static const QString c_flowchartJsFile;
     static const QString c_raphaelJsFile;
+
+    // PlantUML
+    static const QString c_plantUMLJsFile;
+    static const QString c_plantUMLZopfliJsFile;
 
     // Highlight.js line number plugin
     static const QString c_highlightjsLineNumberExtraFile;
@@ -78,7 +82,7 @@ public:
     static const QString c_markdownGuideDocFile;
 
     // Get the label style in Navigation mode.
-    QString getNavigationLabelStyle(const QString &p_str) const;
+    QString getNavigationLabelStyle(const QString &p_str, bool p_small = false) const;
 
     // Given the path of a file, first try to open it as note file,
     // then try to open it as orphan file.
@@ -98,6 +102,23 @@ public:
     // Returns a VDirectory struct if it is a folder in one notebook.
     // Otherwise, returns NULL.
     VDirectory *getInternalDirectory(const QString &p_path);
+
+    // Given the path of a file, try to find it in all notebooks.
+    // Returns a VNotebook struct if it is the root folder of a notebook.
+    VNotebook *getNotebook(const QString &p_path);
+
+    void freeOrphanFiles();
+
+    // @p_renderBg: background color, empty to not specify given color.
+    static QString generateHtmlTemplate(const QString &p_renderBg,
+                                        const QString &p_renderStyleUrl,
+                                        const QString &p_codeBlockStyleUrl,
+                                        bool p_isPDF);
+
+    // @p_renderBg: background color, empty to not specify given color.
+    static QString generateExportHtmlTemplate(const QString &p_renderBg);
+
+    static QString generateMathJaxPreviewTemplate();
 
 public slots:
     void updateTemplate();

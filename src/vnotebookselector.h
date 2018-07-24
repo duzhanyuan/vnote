@@ -8,7 +8,6 @@
 
 class VNotebook;
 class QListWidget;
-class QAction;
 class QListWidgetItem;
 class QLabel;
 
@@ -26,6 +25,10 @@ public:
 
     // Add notebook on popup if no notebooks currently.
     void showPopup() Q_DECL_OVERRIDE;
+
+    VNotebook *currentNotebook() const;
+
+    void restoreCurrentNotebook();
 
     // Implementations for VNavigationMode.
     void registerNavigation(QChar p_majorKey) Q_DECL_OVERRIDE;
@@ -62,8 +65,6 @@ private slots:
     void editNotebookInfo();
 
 private:
-    void initActions();
-
     // Update Combox from m_notebooks.
     void updateComboBox();
 
@@ -73,8 +74,10 @@ private:
     // If @p_import is true, we will use the existing config file.
     // If @p_imageFolder is empty, we will use the global one.
     // If @p_attachmentFolder is empty, we will use the global one.
-    void createNotebook(const QString &p_name, const QString &p_path,
-                        bool p_import, const QString &p_imageFolder,
+    void createNotebook(const QString &p_name,
+                        const QString &p_path,
+                        bool p_import,
+                        const QString &p_imageFolder,
                         const QString &p_attachmentFolder);
 
     void deleteNotebook(VNotebook *p_notebook, bool p_deleteFiles);
@@ -108,13 +111,6 @@ private:
 
     // Whether it is muted from currentIndexChanged().
     bool m_muted;
-
-    // Actions
-    QAction *m_deleteNotebookAct;
-    QAction *m_notebookInfoAct;
-    QAction *m_openLocationAct;
-    QAction *m_recycleBinAct;
-    QAction *m_emptyRecycleBinAct;
 
     QLabel *m_naviLabel;
 };

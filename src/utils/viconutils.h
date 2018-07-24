@@ -3,11 +3,11 @@
 
 #include <QString>
 #include <QIcon>
+#include <QHash>
 
 #include "vpalette.h"
 
 extern VPalette *g_palette;
-
 
 class VIconUtils
 {
@@ -17,9 +17,9 @@ public:
                       const QString &p_fg = QString(),
                       bool p_addDisabled = true);
 
-    static QIcon toolButtonIcon(const QString &p_file)
+    static QIcon toolButtonIcon(const QString &p_file, bool p_addDisabled = true)
     {
-        return icon(p_file, g_palette->color("toolbutton_icon_fg"));
+        return icon(p_file, g_palette->color("toolbutton_icon_fg"), p_addDisabled);
     }
 
     static QIcon toolButtonDangerIcon(const QString &p_file)
@@ -94,6 +94,14 @@ public:
 
 private:
     VIconUtils();
+
+    static QString cacheKey(const QString &p_file, const QString &p_fg, bool p_addDisabled)
+    {
+        return p_file + "_" + p_fg + "_" + (p_addDisabled ? "1" : "0");
+    }
+
+    // file_fg_addDisabled as key.
+    static QHash<QString, QIcon> m_cache;
 };
 
 #endif // VICONUTILS_H

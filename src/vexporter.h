@@ -1,51 +1,65 @@
 #ifndef VEXPORTER_H
 #define VEXPORTER_H
 
-#include <QDialog>
+#include <QObject>
 #include <QPageLayout>
-#include <QString>
-#include "vconfigmanager.h"
+#include <QUrl>
+#include <QWebEngineDownloadItem>
+#include <QStringList>
 
+#include "dialog/vexportdialog.h"
+
+class QWidget;
 class VWebView;
-class VFile;
-class VLineEdit;
-class QLabel;
-class QDialogButtonBox;
-class QPushButton;
-class QProgressBar;
+class VDocument;
 
-enum class ExportType
-{
-    PDF = 0,
-    HTML
-};
-
-class VExporter : public QDialog
+class VExporter : public QObject
 {
     Q_OBJECT
 public:
-    explicit VExporter(MarkdownConverterType p_mdType = MarkdownIt, QWidget *p_parent = 0);
+    explicit VExporter(QWidget *p_parent = nullptr);
 
-    void exportNote(VFile *p_file, ExportType p_type);
+    void prepareExport(const ExportOption &p_opt);
+
+    bool exportPDF(VFile *p_file,
+                   const ExportOption &p_opt,
+                   const QString &p_outputFile,
+                   QString *p_errMsg = NULL);
+
+    bool exportHTML(VFile *p_file,
+                    const ExportOption &p_opt,
+                    const QString &p_outputFile,
+                    QString *p_errMsg = NULL);
+
+    bool exportCustom(VFile *p_file,
+                      const ExportOption &p_opt,
+                      const QString &p_outputFile,
+                      QString *p_errMsg = NULL);
+
+    int exportPDFInOne(const QList<QString> &p_htmlFiles,
+                       const ExportOption &p_opt,
+                       const QString &p_outputFile,
+                       QString *p_errMsg = NULL);
+
+    int exportCustomInOne(const QList<QString> &p_files,
+                          const ExportOption &p_opt,
+                          const QString &p_outputFile,
+                          QString *p_errMsg = NULL);
+
+    void setAskedToStop(bool p_askedToStop);
+
+signals:
+    // Request to output log.
+    void outputLog(const QString &p_log);
 
 private slots:
-    void handleBrowseBtnClicked();
-    void handleLayoutBtnClicked();
-    void startExport();
-    void cancelExport();
     void handleLogicsFinished();
+
     void handleLoadFinished(bool p_ok);
-    void openTargetPath() const;
+
+    void handleDownloadRequested(QWebEngineDownloadItem *p_item);
 
 private:
-    enum class ExportSource
-    {
-        Note = 0,
-        Directory,
-        Notebook,
-        Invalid
-    };
-
     enum class ExportState
     {
         Idle = 0,
@@ -54,6 +68,7 @@ private:
         Failed,
         Successful
     };
+
 
     enum NoteState
     {
@@ -64,59 +79,134 @@ private:
         Failed = 0x4
     };
 
-    void setupUI();
 
-    void initMarkdownTemplate();
-
-    void updatePageLayoutLabel();
-
-    void setFilePath(const QString &p_path);
-
-    QString getFilePath() const;
-
-    void initWebViewer(VFile *p_file);
+    void initWebViewer(VFile *p_file, const ExportOption &p_opt);
 
     void clearWebViewer();
 
-    void enableUserInput(bool p_enabled);
-
-    bool exportToPDF(VWebView *p_webViewer, const QString &p_filePath, const QPageLayout &p_layout);
-
     void clearNoteState();
+
     bool isNoteStateReady() const;
+
     bool isNoteStateFailed() const;
+
+    bool exportViaWebView(VFile *p_file,
+                          const ExportOption &p_opt,
+                          const QString &p_outputFile,
+                          QString *p_errMsg = NULL);
+
+    bool exportToPDF(VWebView *p_webViewer,
+                     const QString &p_filePath,
+                     const QPageLayout &p_layout);
+
+    bool exportToPDFViaWK(VDocument *p_webDocument,
+                          const ExportPDFOption &p_opt,
+                          const QString &p_filePath,
+                          QString *p_errMsg = NULL);
+
+    bool exportToCustom(VDocument *p_webDocument,
+                        const ExportCustomOption &p_opt,
+                        const QString &p_filePath,
+                        QString *p_errMsg = NULL);
+
+    bool exportToHTML(VDocument *p_webDocument,
+                      const ExportHTMLOption &p_opt,
+                      const QString &p_filePath);
+
+    bool exportToMHTML(VWebView *p_webViewer,
+                       const ExportHTMLOption &p_opt,
+                       const QString &p_filePath);
+
+    bool htmlsToPDFViaWK(const QList<QString> &p_htmlFiles,
+                         const QString &p_filePath,
+                         const ExportPDFOption &p_opt,
+                         QString *p_errMsg = NULL);
+
+    bool convertFilesViaCustom(const QList<QString> &p_files,
+                               const QString &p_filePath,
+                               const ExportCustomOption &p_opt,
+                               QString *p_errMsg = NULL);
+
+    void prepareWKArguments(const ExportPDFOption &p_opt);
+
+    int startProcess(const QString &p_program, const QStringList &p_args);
+
+    int startProcess(const QString &p_cmd);
+
+    // @p_embedImages: embed <img> as data URI.
+    bool outputToHTMLFile(const QString &p_file,
+                          const QString &p_headContent,
+                          const QString &p_styleContent,
+                          const QString &p_bodyContent,
+                          bool p_embedCssStyle,
+                          bool p_completeHTML,
+                          bool p_embedImages);
+
+    // Fix @p_html's resources like url("...") with "file" or "qrc" schema.
+    // Copy the resource to @p_folder and fix the url string.
+    static bool fixStyleResources(const QString &p_folder,
+                                  QString &p_html);
+
+    // Fix @p_html's resources like url("...") with "file" or "qrc" schema.
+    // Embed the image data in data URIs.
+    static bool embedStyleResources(QString &p_html);
+
+    // Fix @p_html's resources like <img>.
+    // Copy the resource to @p_folder and fix the url string.
+    static bool fixBodyResources(const QUrl &p_baseUrl,
+                                 const QString &p_folder,
+                                 QString &p_html);
+
+    // Embed @p_html's resources like <img>.
+    static bool embedBodyResources(const QUrl &p_baseUrl, QString &p_html);
+
+    static QString getResourceRelativePath(const QString &p_file);
+
+    QPageLayout m_pageLayout;
 
     // Will be allocated and free for each conversion.
     VWebView *m_webViewer;
 
-    MarkdownConverterType m_mdType;
+    VDocument *m_webDocument;
+
+    // Base URL of VWebView.
+    QUrl m_baseUrl;
+
     QString m_htmlTemplate;
-    VFile *m_file;
-    ExportType m_type;
-    ExportSource m_source;
+
+    // Template to hold the export HTML result.
+    QString m_exportHtmlTemplate;
+
     NoteState m_noteState;
 
     ExportState m_state;
 
-    QLabel *m_infoLabel;
-    VLineEdit *m_pathEdit;
-    QPushButton *m_browseBtn;
-    QLabel *m_layoutLabel;
-    QPushButton *m_layoutBtn;
-    QDialogButtonBox *m_btnBox;
-    QPushButton *m_openBtn;
+    // Download state used for MIME HTML.
+    QWebEngineDownloadItem::DownloadState m_downloadState;
 
-    // Progress label and bar.
-    QLabel *m_proLabel;
-    QProgressBar *m_proBar;
+    // Arguments for wkhtmltopdf.
+    QStringList m_wkArgs;
 
-    QPageLayout m_pageLayout;
-
-    // Whether a PDF has been exported.
-    bool m_exported;
-
-    // The default directory.
-    static QString s_defaultPathDir;
+    bool m_askedToStop;
 };
 
+inline void VExporter::clearNoteState()
+{
+    m_noteState = NoteState::NotReady;
+}
+
+inline bool VExporter::isNoteStateReady() const
+{
+    return m_noteState == NoteState::Ready;
+}
+
+inline bool VExporter::isNoteStateFailed() const
+{
+    return m_noteState & NoteState::Failed;
+}
+
+inline void VExporter::setAskedToStop(bool p_askedToStop)
+{
+    m_askedToStop = p_askedToStop;
+}
 #endif // VEXPORTER_H

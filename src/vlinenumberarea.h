@@ -35,7 +35,6 @@ public:
     VLineNumberArea(VTextEditWithLineNumber *p_editor,
                     const QTextDocument *p_document,
                     int p_digitWidth,
-                    int p_digitHeight,
                     QWidget *p_parent = nullptr);
 
     QSize sizeHint() const Q_DECL_OVERRIDE
@@ -43,12 +42,9 @@ public:
         return QSize(calculateWidth(), 0);
     }
 
-    int calculateWidth() const;
+    void setDigitWidth(int p_width);
 
-    int getDigitHeight() const
-    {
-        return m_digitHeight;
-    }
+    int calculateWidth() const;
 
     const QColor &getBackgroundColor() const;
     void setBackgroundColor(const QColor &p_color);
@@ -68,7 +64,6 @@ private:
     int m_width;
     int m_blockCount;
     int m_digitWidth;
-    int m_digitHeight;
     QColor m_foregroundColor;
     QColor m_backgroundColor;
 };
@@ -93,4 +88,8 @@ inline void VLineNumberArea::setForegroundColor(const QColor &p_color)
     m_foregroundColor = p_color;
 }
 
+inline void VLineNumberArea::setDigitWidth(int p_width)
+{
+    m_digitWidth = p_width;
+}
 #endif // VLINENUMBERAREA_H

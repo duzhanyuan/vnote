@@ -44,7 +44,10 @@ bool VFile::open()
     Q_ASSERT(m_content.isEmpty());
 
     QString filePath = fetchPath();
-    Q_ASSERT(QFileInfo::exists(filePath));
+    if (!QFileInfo::exists(filePath)) {
+        return false;
+    }
+
     m_content = VUtils::readFileFromDisk(filePath);
     m_lastModified = QFileInfo(filePath).lastModified();
     m_opened = true;
@@ -112,7 +115,7 @@ bool VFile::isInternalImageFolder(const QString &p_path) const
 bool VFile::isChangedOutside() const
 {
     QDateTime lm = QFileInfo(fetchPath()).lastModified();
-    return  lm != m_lastModified;
+    return lm.toSecsSinceEpoch() != m_lastModified.toSecsSinceEpoch();
 }
 
 void VFile::reload()

@@ -10,6 +10,8 @@
 #include <QtDebug>
 #include <QStringList>
 
+#include "utils/vutils.h"
+
 VStyleParser::VStyleParser()
 {
     markdownStyles = NULL;
@@ -73,7 +75,7 @@ QTextCharFormat VStyleParser::QTextCharFormatFromAttrs(pmh_style_attribute *attr
         case pmh_attr_type_font_family:
         {
             QString familyList(attrs->value->font_family);
-            QString finalFamily = filterAvailableFontFamily(familyList);
+            QString finalFamily = VUtils::getAvailableFontFamily(familyList.split(','));
             if (!finalFamily.isEmpty()) {
                 format.setFontFamily(finalFamily);
             }
@@ -86,12 +88,19 @@ QTextCharFormat VStyleParser::QTextCharFormatFromAttrs(pmh_style_attribute *attr
             if (fontStyle->italic) {
                 format.setFontItalic(true);
             }
+
             if (fontStyle->bold) {
                 format.setFontWeight(QFont::Bold);
             }
+
             if (fontStyle->underlined) {
                 format.setFontUnderline(true);
             }
+
+            if (fontStyle->strikeout) {
+                format.setFontStrikeOut(true);
+            }
+
             break;
         }
 
@@ -109,6 +118,8 @@ void VStyleParser::parseMarkdownStyle(const QString &styleStr)
     if (markdownStyles) {
         pmh_free_style_collection(markdownStyles);
     }
+
+    // markdownStyles is not indexed by element type.
     markdownStyles = pmh_parse_styles(styleStr.toLocal8Bit().data(),
                                       &markdownStyleErrorCB, this);
 }
@@ -122,6 +133,7 @@ QVector<HighlightingStyle> VStyleParser::fetchMarkdownStyles(const QFont &baseFo
         if (!attr) {
             continue;
         }
+
         HighlightingStyle style;
         style.type = attr->lang_element_type;
         style.format = QTextCharFormatFromAttrs(attr, baseFont);
@@ -134,7 +146,18 @@ QHash<QString, QTextCharFormat> VStyleParser::fetchCodeBlockStyles(const QFont &
 {
     QHash<QString, QTextCharFormat> styles;
 
-    pmh_style_attribute *attrs = markdownStyles->element_styles[pmh_VERBATIM];
+    pmh_style_attribute *attrs = NULL;
+    for (int i = 0; i < pmh_NUM_LANG_TYPES; ++i) {
+        pmh_style_attribute *tmp = markdownStyles->element_styles[i];
+        if (!tmp) {
+            continue;
+        }
+
+        if (tmp->lang_element_type == pmh_FENCEDCODEBLOCK) {
+            attrs = tmp;
+            break;
+        }
+    }
 
     // First set up the base format.
     QTextCharFormat baseFormat = QTextCharFormatFromAttrs(attrs, p_baseFont);
@@ -157,6 +180,8 @@ QHash<QString, QTextCharFormat> VStyleParser::fetchCodeBlockStyles(const QFont &
                     format.setFontItalic(true);
                 } else if (val == "underlined") {
                     format.setFontUnderline(true);
+                } else if (val == "strikeout") {
+                    format.setFontStrikeOut(true);
                 } else {
                     // Treat it as the color RGB value string without '#'.
                     QColor color("#" + val);
@@ -211,7 +236,7 @@ void VStyleParser::fetchMarkdownEditorStyles(QPalette &palette, QFont &font,
         case pmh_attr_type_font_family:
         {
             QString familyList(editorStyles->value->font_family);
-            QString finalFamily = filterAvailableFontFamily(familyList);
+            QString finalFamily = VUtils::getAvailableFontFamily(familyList.split(','));
             if (!finalFamily.isEmpty()) {
                 font.setFamily(finalFamily);
             }
@@ -298,28 +323,4 @@ void VStyleParser::fetchMarkdownEditorStyles(QPalette &palette, QFont &font,
         }
         selStyles = selStyles->next;
     }
-}
-
-// @familyList is a comma separated string
-QString VStyleParser::filterAvailableFontFamily(const QString &familyList) const
-{
-    QStringList families = familyList.split(',', QString::SkipEmptyParts);
-    QStringList availFamilies = QFontDatabase().families();
-
-    qDebug() << "family:" << familyList;
-    for (int i = 0; i < families.size(); ++i) {
-        QString family = families[i].trimmed();
-        for (int j = 0; j < availFamilies.size(); ++j) {
-            QString availFamily = availFamilies[j];
-            availFamily.remove(QRegExp("\\[.*\\]"));
-            availFamily = availFamily.trimmed();
-            if (family == availFamily
-                || family.toLower() == availFamily.toLower()) {
-                qDebug() << "matched family:" << availFamilies[j];
-                return availFamilies[j];
-            }
-        }
-    }
-
-    return QString();
 }

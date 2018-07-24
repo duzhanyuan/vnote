@@ -1,13 +1,14 @@
 #ifndef VDIRECTORYTREE_H
 #define VDIRECTORYTREE_H
 
-#include <QTreeWidget>
 #include <QJsonObject>
 #include <QPointer>
 #include <QVector>
 #include <QMap>
 #include <QList>
 #include <QHash>
+
+#include "vtreewidget.h"
 #include "vdirectory.h"
 #include "vnotebook.h"
 #include "vnavigationmode.h"
@@ -16,7 +17,7 @@
 class VEditArea;
 class QLabel;
 
-class VDirectoryTree : public QTreeWidget, public VNavigationMode
+class VDirectoryTree : public VTreeWidget, public VNavigationMode
 {
     Q_OBJECT
 public:
@@ -28,6 +29,8 @@ public:
     bool locateDirectory(const VDirectory *p_directory);
 
     const VNotebook *currentNotebook() const;
+
+    VDirectory *currentDirectory() const;
 
     // Implementations for VNavigationMode.
     void showNavigation() Q_DECL_OVERRIDE;
@@ -90,6 +93,9 @@ private slots:
     // Sort sub-folders of current item's folder.
     void sortItems();
 
+    // Pin selected directory to History.
+    void pinDirectoryToHistory();
+
 protected:
     void mousePressEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
 
@@ -106,8 +112,6 @@ private:
     void fillTreeItem(QTreeWidgetItem *p_item, VDirectory *p_directory);
 
     void initShortcuts();
-
-    void initActions();
 
     // Update @p_item's direct children only: deleted, added, renamed.
     void updateItemDirectChildren(QTreeWidgetItem *p_item);
@@ -159,21 +163,6 @@ private:
 
     // Magic number for clipboard operations.
     int m_magicForClipboard;
-
-    // Actions
-    QAction *newRootDirAct;
-    QAction *newSiblingDirAct;
-    QAction *newSubDirAct;
-    QAction *deleteDirAct;
-    QAction *dirInfoAct;
-    QAction *copyAct;
-    QAction *cutAct;
-    QAction *pasteAct;
-    QAction *m_openLocationAct;
-    QAction *m_sortAct;
-
-    // Reload content from disk.
-    QAction *m_reloadAct;
 
     static const QString c_infoShortcutSequence;
     static const QString c_copyShortcutSequence;

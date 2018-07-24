@@ -6,6 +6,8 @@ qss_file=v_pure.qss
 mdhl_file=v_pure.mdhl
 css_file=v_pure.css
 codeblock_css_file=v_pure_codeblock.css
+mermaid_css_file=v_pure_mermaid.css
+version=15
 
 [phony]
 ; Abstract color attributes.
@@ -39,16 +41,16 @@ hover_fg=@base_fg
 hover_bg=#D0D0D0
 
 selected_fg=@base_fg
-selected_bg=#BDBDBD
+selected_bg=#7BBAB9
 
 active_fg=@selected_fg
 active_bg=@selected_bg
 
 inactive_fg=@selected_fg
-inactive_bg=#D3D3D3
+inactive_bg=#99CFCA
 
-focus_fg=@selected_fg
-focus_bg=@selected_bg
+focus_fg=@base_fg
+focus_bg=#BDBDBD
 
 pressed_fg=@base_fg
 pressed_bg=#B2B2B2
@@ -57,6 +59,8 @@ edit_fg=#222222
 edit_bg=#F5F5F5
 edit_focus_bg=#E0F2F1
 edit_focus_border=@master_bg
+edit_hover_bg=#F2FAF9
+edit_hover_border=@master_bg
 edit_selection_fg=@edit_fg
 edit_selection_bg=@master_light_bg
 
@@ -66,7 +70,7 @@ icon_disabled_fg=@disabled_fg
 danger_fg=#F5F5F5
 danger_bg=#C9302C
 danger_focus_bg=#D9534F
-danger_hover_bg=#D9534F
+danger_hover_bg=#DE6764
 danger_pressed_bg=#AC2925
 
 [soft_defined]
@@ -96,10 +100,24 @@ vim_indicator_cmd_edit_pending_bg=@selected_bg
 
 ; VTabIndicator.
 tab_indicator_label_fg=@base_fg
+tab_indicator_tag_label_fg=#222222
+tab_indicator_tag_label_bg=#ce93db
 
 ; Html template.
 template_title_flash_light_fg=@master_light_bg
 template_title_flash_dark_fg=@master_bg
+
+; Search hit items in list or tree view.
+search_hit_item_fg=@selected_fg
+search_hit_item_bg=#CCE7E4
+
+; Universal Entry CMD Edit border color
+ue_cmd_busy_border=#3F51B5
+ue_cmd_fail_border=@danger_bg
+
+; VListWidget/VTreeWidget separator.
+item_separator_fg=@master_dark_bg
+item_separator_bg=@separator_bg
 
 [widgets]
 ; Widget color attributes.
@@ -108,8 +126,9 @@ template_title_flash_dark_fg=@master_bg
 widget_fg=@base_fg
 
 ; Separator of dock widgets.
-dock_separator_bg=@border_bg
-dock_separator_hover_bg=@border_bg
+dock_separator_bg=@separator_bg
+dock_separator_hover_bg=@hover_bg
+dock_separator_pressed_bg=@pressed_bg
 
 ; Menubar.
 menubar_bg=@main_bg
@@ -119,6 +138,7 @@ menubar_item_selected_bg=@selected_bg
 ; Menu.
 menu_bg=@base_bg
 menu_fg=@base_fg
+menu_border_bg=@border_bg
 menu_item_disabled_fg=@disabled_fg
 menu_item_selected_fg=@selected_fg
 menu_item_selected_bg=@selected_bg
@@ -168,30 +188,7 @@ pushbutton_specialbtn_hover_bg=@master_hover_bg
 pushbutton_specialbtn_checked_bg=#3F51B5
 pushbutton_specialbtn_pressed_bg=@master_pressed_bg
 
-pushbutton_cornerbtn_hover_bg=@hover_bg
-pushbutton_cornerbtn_focus_bg=@focus_bg
-pushbutton_cornerbtn_pressed_bg=@pressed_bg
-
-pushbutton_statusbtn_hover_bg=@hover_bg
-pushbutton_statusbtn_focus_bg=@focus_bg
-pushbutton_statusbtn_pressed_bg=@pressed_bg
-
-pushbutton_avatarbtn_hover_bg=@hover_bg
-pushbutton_avatarbtn_focus_bg=@focus_bg
-pushbutton_avatarbtn_pressed_bg=@pressed_bg
-
-pushbutton_flatbtn_hover_bg=@hover_bg
-pushbutton_flatbtn_focus_bg=@focus_bg
-pushbutton_flatbtn_pressed_bg=@pressed_bg
-
-pushbutton_selectionbtn_hover_bg=@hover_bg
-pushbutton_selectionbtn_focus_bg=@focus_bg
-pushbutton_selectionbtn_pressed_bg=@pressed_bg
-
 pushbutton_titlebtn_bg=@title_bg
-pushbutton_titlebtn_hover_bg=@hover_bg
-pushbutton_titlebtn_focus_bg=@focus_bg
-pushbutton_titlebtn_pressed_bg=@pressed_bg
 
 pushbutton_dangerbtn_fg=@danger_fg
 pushbutton_dangerbtn_bg=@danger_bg
@@ -214,6 +211,7 @@ buttonmenuitem_decoration_text_fg=@master_dark_bg
 combobox_border=@border_bg
 combobox_fg=@content_fg
 combobox_bg=@content_bg
+combobox_disabled_fg=@disabled_fg
 combobox_view_border=@border_bg
 combobox_view_selected_bg=@selected_bg
 combobox_view_selected_fg=@selected_fg
@@ -221,6 +219,8 @@ combobox_view_item_hover_fg=@hover_fg
 combobox_view_item_hover_bg=@hover_bg
 combobox_focus_bg=@edit_focus_bg
 combobox_focus_border=@edit_focus_border
+combobox_hover_bg=@edit_hover_bg
+combobox_hover_border=@edit_hover_border
 combobox_item_icon_fg=@item_icon_fg
 
 combobox_notebookselector_fg=@master_dark_bg
@@ -240,8 +240,11 @@ label_titlelabel_bg=@title_bg
 lineedit_border=@border_bg
 lineedit_fg=@edit_fg
 lineedit_bg=@edit_bg
+lineedit_disabled_fg=@disabled_fg
 lineedit_focus_bg=@edit_focus_bg
 lineedit_focus_border=@edit_focus_border
+lineedit_hover_bg=@edit_hover_bg
+lineedit_hover_border=@edit_hover_border
 lineedit_selection_fg=@edit_selection_fg
 lineedit_selection_bg=@edit_selection_bg
 
@@ -299,6 +302,7 @@ listview_item_selected_inactive_bg=@inactive_bg
 
 ; Splitter.
 splitter_handle_bg=@border_bg
+splitter_handle_pressed_bg=@pressed_bg
 
 ; StatusBar.
 statusbar_fg=@main_fg
@@ -316,10 +320,14 @@ editwindow_corner_icon_fg=@master_bg
 editwindow_corner_icon_inactive_fg=#D3D3D3
 
 ; CheckBox.
+checkbox_disabled_fg=@disabled_fg
+checkbox_indicator_focus_bg=@focus_bg
 checkbox_indicator_hover_bg=@hover_bg
 checkbox_indicator_pressed_bg=@pressed_bg
 
 ; RadioButton.
+radiobutton_disabled_fg=@disabled_fg
+radiobutton_indicator_focus_bg=@focus_bg
 radiobutton_indicator_hover_bg=@hover_bg
 radiobutton_indicator_pressed_bg=@pressed_bg
 
@@ -331,6 +339,8 @@ spinbox_selection_fg=@edit_selection_fg
 spinbox_selection_bg=@edit_selection_bg
 spinbox_focus_border=@edit_focus_border
 spinbox_focus_bg=@edit_focus_bg
+spinbox_hover_border=@edit_hover_border
+spinbox_hover_bg=@edit_hover_bg
 spinbox_button_hover_bg=@hover_bg
 spinbox_button_pressed_bg=@pressed_bg
 
@@ -345,3 +355,12 @@ headerview_checked_bg=@selected_bg
 progressbar_bg=@edit_bg
 progressbar_border_bg=@border_bg
 progressbar_chunk_bg=@master_light_bg
+
+universalentry_bg=@base_bg
+universalentry_border_bg=@border_bg
+
+doublerowitem_second_row_label_fg=#6C6C6C
+
+; GroupBox.
+groupbox_border=@border_bg
+groupbox_title_fg=@base_fg

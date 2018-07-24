@@ -10,7 +10,6 @@
 #include "vnote.h"
 #include "utils/vutils.h"
 #include "vconfigmanager.h"
-#include "vmainwindow.h"
 #include "vorphanfile.h"
 #include "vnotefile.h"
 #include "vpalette.h"
@@ -26,8 +25,6 @@ QString VNote::s_simpleHtmlTemplate;
 
 QString VNote::s_markdownTemplate;
 
-QString VNote::s_markdownTemplatePDF;
-
 QString VNote::s_sloganTemplate = "<div class=\"typewriter\"><h3>Hi Markdown, I'm VNote</h3></div>";
 
 const QString VNote::c_hoedownJsFile = ":/resources/hoedown.js";
@@ -42,18 +39,23 @@ const QString VNote::c_markdownitTaskListExtraFile = ":/utils/markdown-it/markdo
 const QString VNote::c_markdownitSubExtraFile = ":/utils/markdown-it/markdown-it-sub.min.js";
 const QString VNote::c_markdownitSupExtraFile = ":/utils/markdown-it/markdown-it-sup.min.js";
 const QString VNote::c_markdownitFootnoteExtraFile = ":/utils/markdown-it/markdown-it-footnote.min.js";
+const QString VNote::c_markdownitFrontMatterExtraFile = ":/utils/markdown-it/markdown-it-front-matter.js";
+const QString VNote::c_markdownitImsizeExtraFile = ":/utils/markdown-it/markdown-it-imsize.min.js";
+const QString VNote::c_markdownitEmojiExtraFile = ":/utils/markdown-it/markdown-it-emoji.min.js";
+const QString VNote::c_markdownitTexMathExtraFile = ":/utils/markdown-it/markdown-it-texmath.js";
 
 const QString VNote::c_showdownJsFile = ":/resources/showdown.js";
 const QString VNote::c_showdownExtraFile = ":/utils/showdown/showdown.min.js";
 const QString VNote::c_showdownAnchorExtraFile = ":/utils/showdown/showdown-headinganchor.js";
 
 const QString VNote::c_mermaidApiJsFile = ":/utils/mermaid/mermaidAPI.min.js";
-const QString VNote::c_mermaidCssFile = ":/utils/mermaid/mermaid.css";
-const QString VNote::c_mermaidDarkCssFile = ":/utils/mermaid/mermaid.dark.css";
 const QString VNote::c_mermaidForestCssFile = ":/utils/mermaid/mermaid.forest.css";
 
 const QString VNote::c_flowchartJsFile = ":/utils/flowchart.js/flowchart.min.js";
 const QString VNote::c_raphaelJsFile = ":/utils/flowchart.js/raphael.min.js";
+
+const QString VNote::c_plantUMLJsFile = "http://s.plantuml.com/synchro2.js";
+const QString VNote::c_plantUMLZopfliJsFile = "http://s.plantuml.com/zopfli.raw.min.js";
 
 const QString VNote::c_highlightjsLineNumberExtraFile = ":/utils/highlightjs/highlightjs-line-numbers.min.js";
 
@@ -69,8 +71,6 @@ VNote::VNote(QObject *parent)
     initTemplate();
 
     g_config->getNotebooks(m_notebooks, this);
-
-    m_metaWordMgr.init();
 
     g_mwMgr = &m_metaWordMgr;
 }
@@ -96,26 +96,16 @@ void VNote::updateSimpletHtmlTemplate()
     s_simpleHtmlTemplate.replace(cssHolder, g_config->getCssStyleUrl());
 }
 
-void VNote::updateTemplate()
+QString VNote::generateHtmlTemplate(const QString &p_renderBg,
+                                    const QString &p_renderStyleUrl,
+                                    const QString &p_codeBlockStyleUrl,
+                                    bool p_isPDF)
 {
     const QString c_markdownTemplatePath(":/resources/markdown_template.html");
 
-    // Get background color
-    QString color;
-    const QString &curRenderBg = g_config->getCurRenderBackgroundColor();
-    const QVector<VColor> &customColors = g_config->getCustomColors();
-    if (curRenderBg != "System") {
-        for (int i = 0; i < customColors.size(); ++i) {
-            if (customColors[i].m_name == curRenderBg) {
-                color = customColors[i].m_color;
-                break;
-            }
-        }
-    }
-
     QString cssStyle;
-    if (!color.isEmpty()) {
-        cssStyle += "body { background-color: " + color + " !important; }\n";
+    if (!p_renderBg.isEmpty()) {
+        cssStyle += "body { background-color: " + p_renderBg + " !important; }\n";
     }
 
     if (g_config->getEnableImageConstraint()) {
@@ -123,33 +113,91 @@ void VNote::updateTemplate()
         cssStyle += "img { max-width: 100% !important; height: auto !important; }\n";
     }
 
-    const QString styleHolder("<!-- BACKGROUND_PLACE_HOLDER -->");
-    const QString cssHolder("CSS_PLACE_HOLDER");
-    const QString codeBlockCssHolder("HIGHLIGHTJS_CSS_PLACE_HOLDER");
-
-    s_markdownTemplate = VUtils::readFileFromDisk(c_markdownTemplatePath);
-    g_palette->fillStyle(s_markdownTemplate);
+    QString templ = VUtils::readFileFromDisk(c_markdownTemplatePath);
+    g_palette->fillStyle(templ);
 
     // Must replace the code block holder first.
-    s_markdownTemplate.replace(codeBlockCssHolder, g_config->getCodeBlockCssStyleUrl());
-    s_markdownTemplate.replace(cssHolder, g_config->getCssStyleUrl());
+    templ.replace(HtmlHolder::c_codeBlockCssHolder, p_codeBlockStyleUrl);
+    templ.replace(HtmlHolder::c_cssHolder, p_renderStyleUrl);
 
-    s_markdownTemplatePDF = s_markdownTemplate;
-
-    if (!cssStyle.isEmpty()) {
-        s_markdownTemplate.replace(styleHolder, cssStyle);
+    if (p_isPDF) {
+        // Shoudl not display scrollbar in PDF.
+        cssStyle += "pre { white-space: pre-wrap !important; "
+                          "word-break: break-all !important; }\n"
+                    "pre code { white-space: pre-wrap !important; "
+                               "word-break: break-all !important; }\n"
+                    "code { word-break: break-all !important; }\n"
+                    "div.flowchart-diagram { overflow: hidden !important; }\n"
+                    "div.mermaid-diagram { overflow: hidden !important; }\n"
+                    "div.plantuml-diagram { overflow: hidden !important; }\n"
+                    "a { word-break: break-all !important; }\n"
+                    "td.hljs-ln-code { white-space: pre-wrap !important; "
+                                      "word-break: break-all !important; }\n";
+        if (!g_config->getEnableImageConstraint()) {
+            // Constain the image width by force in PDF, otherwise, the PDF will
+            // be cut off.
+            cssStyle += "img { max-width: 100% !important; height: auto !important; }\n";
+        }
     }
 
-    // Shoudl not display scrollbar in PDF.
-    cssStyle += "pre { white-space: pre-wrap !important; "
-                      "word-break: break-all !important; }\n";
-    if (!g_config->getEnableImageConstraint()) {
-        // Constain the image width by force in PDF, otherwise, the PDF will
-        // be cut off.
+    if (!cssStyle.isEmpty()) {
+        templ.replace(HtmlHolder::c_globalStyleHolder, cssStyle);
+    }
+
+    return templ;
+}
+
+QString VNote::generateExportHtmlTemplate(const QString &p_renderBg)
+{
+    const QString c_exportTemplatePath(":/resources/export_template.html");
+
+    QString cssStyle;
+    if (!p_renderBg.isEmpty()) {
+        cssStyle += "body { background-color: " + p_renderBg + " !important; }\n";
+    }
+
+    if (g_config->getEnableImageConstraint()) {
+        // Constain the image width.
         cssStyle += "img { max-width: 100% !important; height: auto !important; }\n";
     }
 
-    s_markdownTemplatePDF.replace(styleHolder, cssStyle);
+    QString templ = VUtils::readFileFromDisk(c_exportTemplatePath);
+    g_palette->fillStyle(templ);
+
+    if (!cssStyle.isEmpty()) {
+        templ.replace(HtmlHolder::c_globalStyleHolder, cssStyle);
+    }
+
+    return templ;
+}
+
+QString VNote::generateMathJaxPreviewTemplate()
+{
+    const QString c_templatePath(":/resources/mathjax_preview_template.html");
+    QString templ = VUtils::readFileFromDisk(c_templatePath);
+    g_palette->fillStyle(templ);
+
+    QString cssStyle;
+    cssStyle += "div.flowchart-diagram { margin: 0px !important; "
+                "                        padding: 0px 5px 0px 5px !important; }\n"
+                "div.mermaid-diagram { margin: 0px !important; "
+                "                      padding: 0px 5px 0px 5px !important; }\n";
+
+    templ.replace(HtmlHolder::c_globalStyleHolder, cssStyle);
+
+    templ.replace(HtmlHolder::c_cssHolder, g_config->getCssStyleUrl());
+
+    return templ;
+}
+
+void VNote::updateTemplate()
+{
+    QString renderBg = g_config->getRenderBackgroundColor(g_config->getCurRenderBackgroundColor());
+
+    s_markdownTemplate = generateHtmlTemplate(renderBg,
+                                              g_config->getCssStyleUrl(),
+                                              g_config->getCodeBlockCssStyleUrl(),
+                                              false);
 }
 
 const QVector<VNotebook *> &VNote::getNotebooks() const
@@ -162,11 +210,12 @@ QVector<VNotebook *> &VNote::getNotebooks()
     return m_notebooks;
 }
 
-QString VNote::getNavigationLabelStyle(const QString &p_str) const
+QString VNote::getNavigationLabelStyle(const QString &p_str, bool p_small) const
 {
     static int lastLen = -1;
     static int pxWidth = 24;
-    const int fontPt = 15;
+    static int pxHeight = 24;
+    const int fontPt = p_small ? 12 : 15;
 
     QString fontFamily = getMonospacedFont();
 
@@ -175,25 +224,36 @@ QString VNote::getNavigationLabelStyle(const QString &p_str) const
         font.setBold(true);
         QFontMetrics fm(font);
         pxWidth = fm.width(p_str);
+        pxHeight = fm.capHeight() + 5;
         lastLen = p_str.size();
     }
 
     QColor bg(g_palette->color("navigation_label_bg"));
     bg.setAlpha(200);
 
-    return QString("background-color: %1;"
-                   "color: %2;"
-                   "font-size: %3pt;"
-                   "font: bold;"
-                   "font-family: %4;"
-                   "border-radius: 3px;"
-                   "min-width: %5px;"
-                   "max-width: %5px;")
-                   .arg(bg.name(QColor::HexArgb))
-                   .arg(g_palette->color("navigation_label_fg"))
-                   .arg(fontPt)
-                   .arg(fontFamily)
-                   .arg(pxWidth);
+    QString style = QString("background-color: %1;"
+                            "color: %2;"
+                            "font-size: %3pt;"
+                            "font: bold;"
+                            "font-family: %4;"
+                            "border-radius: 3px;"
+                            "min-width: %5px;"
+                            "max-width: %5px;")
+                           .arg(bg.name(QColor::HexArgb))
+                           .arg(g_palette->color("navigation_label_fg"))
+                           .arg(fontPt)
+                           .arg(fontFamily)
+                           .arg(pxWidth);
+
+    if (p_small) {
+        style += QString("margin: 0px;"
+                         "padding: 0px;"
+                         "min-height: %1px;"
+                         "max-height: %1px;")
+                        .arg(pxHeight);
+    }
+
+    return style;
 }
 
 const QString &VNote::getMonospacedFont() const
@@ -238,15 +298,7 @@ VOrphanFile *VNote::getOrphanFile(const QString &p_path, bool p_modifiable, bool
         }
     }
 
-    for (int i = 0; i < m_externalFiles.size(); ++i) {
-        VOrphanFile *file = m_externalFiles[i];
-        if (!file->isOpened()) {
-            qDebug() << "release orphan file" << file;
-            m_externalFiles.removeAt(i);
-            delete file;
-            --i;
-        }
-    }
+    freeOrphanFiles();
 
     // Create a VOrphanFile for path.
     VOrphanFile *file = new VOrphanFile(this, path, p_modifiable, p_systemFile);
@@ -295,4 +347,29 @@ VDirectory *VNote::getInternalDirectory(const QString &p_path)
 
     return dir;
 
+}
+
+VNotebook *VNote::getNotebook(const QString &p_path)
+{
+    for (auto & nb : m_notebooks) {
+        if (VUtils::equalPath(nb->getPath(), p_path)) {
+            return nb;
+        }
+    }
+
+    return NULL;
+}
+
+void VNote::freeOrphanFiles()
+{
+    for (int i = 0; i < m_externalFiles.size();) {
+        VOrphanFile *file = m_externalFiles[i];
+        if (!file->isOpened()) {
+            qDebug() << "release orphan file" << file;
+            m_externalFiles.removeAt(i);
+            delete file;
+        } else {
+            ++i;
+        }
+    }
 }

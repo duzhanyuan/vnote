@@ -944,6 +944,23 @@ QString VEditUtils::fetchIndentSpaces(const QTextBlock &p_block)
     return regExp.capturedTexts()[1];
 }
 
+int VEditUtils::fetchIndentation(const QString &p_text)
+{
+    int idx = 0;
+    for (; idx < p_text.size(); ++idx) {
+        if (!p_text[idx].isSpace()) {
+            break;
+        }
+    }
+
+    return idx;
+}
+
+int VEditUtils::fetchIndentation(const QTextBlock &p_block)
+{
+    return fetchIndentation(p_block.text());
+}
+
 void VEditUtils::insertBlock(QTextCursor &p_cursor,
                              bool p_above)
 {
@@ -961,4 +978,30 @@ void VEditUtils::insertBlock(QTextCursor &p_cursor,
     }
 
     p_cursor.movePosition(QTextCursor::EndOfBlock);
+}
+
+void VEditUtils::insertBeforeEachLine(QString &p_text, const QString &p_str)
+{
+    int pos = 0;
+    while (pos < p_text.size()) {
+        int idx = p_text.indexOf("\n", pos);
+        if (idx == -1) {
+            break;
+        }
+
+        ++idx;
+        if (idx == p_text.size()) {
+            break;
+        }
+
+        p_text.insert(idx, p_str);
+        pos = idx + p_str.size();
+    }
+
+    p_text.prepend(p_str);
+}
+
+bool VEditUtils::isEmptyBlock(const QTextBlock &p_block)
+{
+    return p_block.length() == 1;
 }

@@ -1,4 +1,3 @@
-var placeholder = document.getElementById('placeholder');
 var renderer = new marked.Renderer();
 var toc = []; // Table of contents as a list
 var nameCounter = 0;
@@ -6,20 +5,21 @@ var nameCounter = 0;
 renderer.heading = function(text, level) {
     // Use number to avoid issues with Chinese
     var escapedText = 'toc_' + nameCounter++;
+    var textHtml = escapeHtml(text);
     toc.push({
         level: level,
         anchor: escapedText,
-        title: text
+        title: textHtml
     });
-    return '<h' + level + ' id="' + escapedText + '">' + text + '</h' + level + '>';
+    return '<h' + level + ' id="' + escapedText + '">' + textHtml + '</h' + level + '>';
 };
 
 // Highlight.js to highlight code block
 marked.setOptions({
     highlight: function(code, lang) {
-        if (lang) {
+        if (lang && (!specialCodeBlock(lang) || highlightSpecialBlocks)) {
             if (hljs.getLanguage(lang)) {
-                return hljs.highlight(lang, code).value;
+                return hljs.highlight(lang, code, true).value;
             } else {
                 return hljs.highlightAuto(code).value;
             }
@@ -46,13 +46,23 @@ var mdHasTocSection = function(markdown) {
 };
 
 var updateText = function(text) {
+    if (VAddTOC) {
+        text = "[TOC]\n\n" + text;
+    }
+
+    // There is at least one async job for MathJax.
+    asyncJobsCount = 1;
+
     var needToc = mdHasTocSection(text);
     var html = markdownToHtml(text, needToc);
-    placeholder.innerHTML = html;
+    contentDiv.innerHTML = html;
     handleToc(needToc);
     insertImageCaption();
+    setupImageView();
     renderMermaid('lang-mermaid');
-    renderFlowchart('lang-flowchart');
+    renderFlowchart(['lang-flowchart', 'lang-flow']);
+    renderPlantUML('lang-puml');
+    renderGraphviz('lang-dot');
     addClassToCodeBlock();
     renderCodeBlockLineNumber();
 
@@ -60,29 +70,31 @@ var updateText = function(text) {
     // finishLoading logic.
     if (VEnableMathjax) {
         try {
-            MathJax.Hub.Queue(["Typeset", MathJax.Hub, placeholder, finishLogics]);
+            MathJax.Hub.Queue(["Typeset", MathJax.Hub, contentDiv, postProcessMathJax]);
         } catch (err) {
             content.setLog("err: " + err);
-            finishLogics();
+            finishOneAsyncJob();
         }
     } else {
-        finishLogics();
+        finishOneAsyncJob();
     }
 };
 
 var highlightText = function(text, id, timeStamp) {
+    highlightSpecialBlocks = true;
     var html = marked(text);
+    highlightSpecialBlocks = false;
     content.highlightTextCB(html, id, timeStamp);
 }
 
-var textToHtml = function(text) {
+var textToHtml = function(identifier, id, timeStamp, text, inlineStyle) {
     var html = marked(text);
-    var container = document.getElementById('text-to-html-div');
-    container.innerHTML = html;
+    if (inlineStyle) {
+        var container = textHtmlDiv;
+        container.innerHTML = html;
+        html = getHtmlWithInlineStyles(container);
+        container.innerHTML = "";
+    }
 
-    html = getHtmlWithInlineStyles(container);
-
-    container.innerHTML = "";
-
-    content.textToHtmlCB(text, html);
+    content.textToHtmlCB(identifier, id, timeStamp, html);
 }

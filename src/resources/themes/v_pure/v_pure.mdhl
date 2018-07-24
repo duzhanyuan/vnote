@@ -11,7 +11,7 @@
 editor
 # QTextEdit just choose the first available font, so specify the Chinese fonts first
 # Do not use "" to quote the name
-font-family: Hiragino Sans GB, 冬青黑体, Microsoft YaHei, 微软雅黑, Microsoft YaHei UI, WenQuanYi Micro Hei, 文泉驿雅黑, Dengxian, 等线体, STXihei, 华文细黑, Liberation Sans, Droid Sans, NSimSun, 新宋体, SimSun, 宋体, Helvetica, sans-serif, Tahoma, Arial, Verdana, Geneva, Georgia, Times New Roman
+font-family: Hiragino Sans GB, 冬青黑体, Microsoft YaHei, 微软雅黑, Microsoft YaHei UI, WenQuanYi Micro Hei, 文泉驿雅黑, Dengxian, 等线体, STXihei, 华文细黑, Liberation Sans, Droid Sans, NSimSun, 新宋体, SimSun, 宋体, Verdana, Helvetica, sans-serif, Tahoma, Arial, Geneva, Georgia, Times New Roman
 font-size: 12
 foreground: 222222
 background: f5f5f5
@@ -35,12 +35,12 @@ incremental-searched-word-background: ce93d8
 # [VNote] Style for color column in fenced code block
 color-column-background: dd0000
 color-column-foreground: ffff00
-# [VNote} Style for preview image line
+# [VNote] Style for preview image line
 preview-image-line-foreground: 9575cd
 
 editor-selection
-foreground: eeeeee
-background: 005fff
+foreground: f5f5f5
+background: 1976d2
 
 editor-current-line
 background: c5cae9
@@ -84,7 +84,8 @@ font-style: bold
 font-size: +2
 
 HRULE
-foreground: 586e75
+foreground: 222222
+background: dac7c9
 
 LIST_BULLET
 foreground: d33682
@@ -128,7 +129,11 @@ foreground: 93a1a1
 VERBATIM
 foreground: 673ab7
 font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New
-# [VNote] Codeblock sylte from HighlightJS (bold, italic, underlined, color)
+
+FENCEDCODEBLOCK
+foreground: 673ab7
+font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New
+# [VNote] Codeblock sylte from HighlightJS (bold, italic, underlined, strikeout, color)
 # The last occurence of the same attribute takes effect
 # Could specify multiple attribute in one line
 hljs-comment: 6c6c6c
@@ -169,4 +174,16 @@ BLOCKQUOTE
 foreground: 00af00
 
 STRIKE
-strike-color: 586e75
+foreground: b71c1c
+font-style: strikeout
+
+FRONTMATTER
+foreground: 6c6c6c
+
+INLINEEQUATION
+foreground: 00897b
+font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New
+
+DISPLAYFORMULA
+foreground: 00897b
+font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New

@@ -17,8 +17,9 @@ VTextBlockData::~VTextBlockData()
     m_previews.clear();
 }
 
-void VTextBlockData::insertPreviewInfo(VPreviewInfo *p_info)
+bool VTextBlockData::insertPreviewInfo(VPreviewInfo *p_info)
 {
+    bool tsUpdated = false;
     bool inserted = false;
     for (auto it = m_previews.begin(); it != m_previews.end();) {
         VPreviewInfo *ele = *it;
@@ -33,13 +34,12 @@ void VTextBlockData::insertPreviewInfo(VPreviewInfo *p_info)
             delete ele;
             *it = p_info;
             inserted = true;
-            qDebug() << "update eixsting image's timestamp" << p_info->m_imageInfo.toString();
+            tsUpdated = true;
             break;
         } else if (p_info->m_imageInfo.intersect(ele->m_imageInfo)) {
             // The new one intersect with an old one.
             // Remove the old one.
             Q_ASSERT(ele->m_timeStamp < p_info->m_timeStamp);
-            qDebug() << "remove intersecting old image" << ele->m_imageInfo.toString();
             delete ele;
             it = m_previews.erase(it);
         } else {
@@ -53,6 +53,8 @@ void VTextBlockData::insertPreviewInfo(VPreviewInfo *p_info)
     }
 
     Q_ASSERT(checkOrder());
+
+    return tsUpdated;
 }
 
 QString VTextBlockData::toString() const
@@ -85,9 +87,8 @@ bool VTextBlockData::clearObsoletePreview(long long p_timeStamp, PreviewSource p
     bool deleted = false;
     for (auto it = m_previews.begin(); it != m_previews.end();) {
         VPreviewInfo *ele = *it;
-
         if (ele->m_source == p_source
-            && ele->m_timeStamp < p_timeStamp) {
+            && ele->m_timeStamp != p_timeStamp) {
             // Remove it.
             qDebug() << "clear obsolete preview" << ele->m_imageInfo.toString();
             delete ele;

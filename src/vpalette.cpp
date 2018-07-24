@@ -116,6 +116,8 @@ QString VPalette::fetchQtStyleSheet() const
     QString style = VUtils::readFileFromDisk(m_data.m_qssFile);
     fillStyle(style);
     fillAbsoluteUrl(style);
+    fillFontFamily(style);
+    fillScaledSize(style);
 
     return style;
 }
@@ -201,6 +203,8 @@ VPaletteMetaData VPalette::getPaletteMetaData(const QString &p_paletteFile)
     QDir dir(VUtils::basePathFromPath(QFileInfo(p_paletteFile).absoluteFilePath()));
 
     settings.beginGroup("metadata");
+    data.m_version = settings.value("version").toInt();
+
     QString val = settings.value("qss_file").toString();
     if (!val.isEmpty()) {
         data.m_qssFile = dir.filePath(val);
@@ -219,6 +223,11 @@ VPaletteMetaData VPalette::getPaletteMetaData(const QString &p_paletteFile)
     val = settings.value("codeblock_css_file").toString();
     if (!val.isEmpty()) {
         data.m_codeBlockCssFile = dir.filePath(val);
+    }
+
+    val = settings.value("mermaid_css_file").toString();
+    if (!val.isEmpty()) {
+        data.m_mermaidCssFile = dir.filePath(val);
     }
 
     QStringList mapping = settings.value("css_color_mapping").toStringList();
@@ -261,4 +270,66 @@ QString VPalette::themeCodeBlockCssStyle(const QString &p_paletteFile)
 {
     VPaletteMetaData data = getPaletteMetaData(p_paletteFile);
     return themeName(p_paletteFile) + "/" + QFileInfo(data.m_codeBlockCssFile).completeBaseName();
+}
+
+int VPalette::getPaletteVersion(const QString &p_paletteFile)
+{
+    return getPaletteMetaData(p_paletteFile).m_version;
+}
+
+void VPalette::fillFontFamily(QString &p_text) const
+{
+    QRegExp reg("(\\s|^)font-family:([^;]+);");
+
+    int pos = 0;
+    while (pos < p_text.size()) {
+        int idx = p_text.indexOf(reg, pos);
+        if (idx == -1) {
+            break;
+        }
+
+        QString familyList = reg.cap(2).trimmed();
+        familyList.remove('"');
+        QString family = VUtils::getAvailableFontFamily(familyList.split(','));
+        if (!family.isEmpty() && family != familyList) {
+            if (family.contains(' ')) {
+                family = "\"" + family + "\"";
+            }
+
+            QString str = QString("%1font-family: %2;").arg(reg.cap(1)).arg(family);
+            p_text.replace(idx, reg.matchedLength(), str);
+
+            pos = idx + str.size();
+        } else {
+            pos = idx + reg.matchedLength();
+        }
+    }
+}
+
+void VPalette::fillScaledSize(QString &p_text) const
+{
+    // Cap(2) is the number string.
+    QRegExp reg("(\\s|:)\\$(\\d+)(?=\\D)");
+    const qreal factor = VUtils::calculateScaleFactor();
+
+    int pos = 0;
+    while (pos < p_text.size()) {
+        int idx = p_text.indexOf(reg, pos);
+        if (idx == -1) {
+            break;
+        }
+
+        QString str = reg.cap(2);
+        bool ok;
+        int val = str.toInt(&ok);
+        if (!ok) {
+            pos = idx + reg.matchedLength();
+            continue;
+        }
+
+        val = val * factor + 0.5;
+        QString newStr = QString("%1%2").arg(reg.cap(1)).arg(val);
+        p_text.replace(idx, reg.matchedLength(), newStr);
+        pos = idx + newStr.size();
+    }
 }

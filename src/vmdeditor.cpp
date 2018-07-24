@@ -3,11 +3,13 @@
 #include <QtWidgets>
 #include <QMenu>
 #include <QDebug>
+#include <QScopedPointer>
+#include <QClipboard>
 
 #include "vdocument.h"
 #include "utils/veditutils.h"
 #include "vedittab.h"
-#include "hgmarkdownhighlighter.h"
+#include "pegmarkdownhighlighter.h"
 #include "vcodeblockhighlighthelper.h"
 #include "vmdeditoperations.h"
 #include "vtableofcontent.h"
@@ -20,6 +22,10 @@
 #include "vpreviewmanager.h"
 #include "utils/viconutils.h"
 #include "dialog/vcopytextashtmldialog.h"
+#include "utils/vwebutils.h"
+#include "dialog/vinsertlinkdialog.h"
+
+extern VWebUtils *g_webUtils;
 
 extern VConfigManager *g_config;
 
@@ -29,10 +35,12 @@ VMdEditor::VMdEditor(VFile *p_file,
                      QWidget *p_parent)
     : VTextEdit(p_parent),
       VEditor(p_file, this),
-      m_mdHighlighter(NULL),
+      m_pegHighlighter(NULL),
       m_freshEdit(true),
       m_textToHtmlDialog(NULL),
-      m_zoomDelta(0)
+      m_zoomDelta(0),
+      m_editTab(NULL),
+      m_copyTimeStamp(0)
 {
     Q_ASSERT(p_file->getDocType() == DocType::Markdown);
 
@@ -52,17 +60,17 @@ VMdEditor::VMdEditor(VFile *p_file,
 
     setReadOnly(true);
 
-    m_mdHighlighter = new HGMarkdownHighlighter(g_config->getMdHighlightingStyles(),
-                                                g_config->getCodeBlockStyles(),
-                                                g_config->getMarkdownHighlightInterval(),
-                                                document());
-
-    connect(m_mdHighlighter, &HGMarkdownHighlighter::headersUpdated,
+    m_pegHighlighter = new PegMarkdownHighlighter(document());
+    m_pegHighlighter->init(g_config->getMdHighlightingStyles(),
+                           g_config->getCodeBlockStyles(),
+                           g_config->getEnableMathjax(),
+                           g_config->getMarkdownHighlightInterval());
+    connect(m_pegHighlighter, &PegMarkdownHighlighter::headersUpdated,
             this, &VMdEditor::updateHeaders);
 
     // After highlight, the cursor may trun into non-visible. We should make it visible
     // in this case.
-    connect(m_mdHighlighter, &HGMarkdownHighlighter::highlightCompleted,
+    connect(m_pegHighlighter, &PegMarkdownHighlighter::highlightCompleted,
             this, [this]() {
             makeBlockVisible(textCursor().block());
 
@@ -72,15 +80,15 @@ VMdEditor::VMdEditor(VFile *p_file,
             }
     });
 
-    m_cbHighlighter = new VCodeBlockHighlightHelper(m_mdHighlighter,
+    m_cbHighlighter = new VCodeBlockHighlightHelper(m_pegHighlighter,
                                                     p_doc,
                                                     p_type);
 
-    m_previewMgr = new VPreviewManager(this, m_mdHighlighter);
-    connect(m_mdHighlighter, &HGMarkdownHighlighter::imageLinksUpdated,
-            m_previewMgr, &VPreviewManager::imageLinksUpdated);
+    m_previewMgr = new VPreviewManager(this, m_pegHighlighter);
+    connect(m_pegHighlighter, &PegMarkdownHighlighter::imageLinksUpdated,
+            m_previewMgr, &VPreviewManager::updateImageLinks);
     connect(m_previewMgr, &VPreviewManager::requestUpdateImageLinks,
-            m_mdHighlighter, &HGMarkdownHighlighter::updateHighlight);
+            m_pegHighlighter, &PegMarkdownHighlighter::updateHighlight);
 
     m_editOps = new VMdEditOperations(this, m_file);
     connect(m_editOps, &VEditOperations::statusMessage,
@@ -91,6 +99,11 @@ VMdEditor::VMdEditor(VFile *p_file,
     connect(this, &VTextEdit::cursorPositionChanged,
             this, &VMdEditor::updateCurrentHeader);
 
+    connect(this, &VTextEdit::cursorPositionChanged,
+            m_object, &VEditorObject::cursorPositionChanged);
+
+    setDisplayScaleFactor(VUtils::calculateScaleFactor());
+
     updateFontAndPalette();
 
     updateConfig();
@@ -98,11 +111,32 @@ VMdEditor::VMdEditor(VFile *p_file,
 
 void VMdEditor::updateFontAndPalette()
 {
-    setFont(g_config->getMdEditFont());
-    setPalette(g_config->getMdEditPalette());
+    QFont font(g_config->getMdEditFont());
+    setFont(font);
 
-    // setPalette() won't change the foreground.
-    setTextColor(g_config->getMdEditPalette().color(QPalette::Text));
+    const QPalette &palette = g_config->getMdEditPalette();
+
+    /*
+        Do not use this function in conjunction with Qt Style Sheets. When
+        using style sheets, the palette of a widget can be customized using
+        the "color", "background-color", "selection-color",
+        "selection-background-color" and "alternate-background-color".
+    */
+    // setPalette(palette);
+    // setTextColor(palette.color(QPalette::Text));
+
+    // Only this could override the font-family set of QWidget in QSS.
+    setStyleSheet(QString("VMdEditor, VLineNumberArea {"
+                          "font-family: \"%1\";"
+                          "font-size: %2pt;"
+                          "color: %3;"
+                          "background-color: %4; }")
+                         .arg(font.family())
+                         .arg(font.pointSize())
+                         .arg(palette.color(QPalette::Text).name())
+                         .arg(palette.color(QPalette::Base).name()));
+
+    updateLineNumberAreaWidth(fontMetrics());
 }
 
 void VMdEditor::beginEdit()
@@ -118,10 +152,10 @@ void VMdEditor::beginEdit()
     emit statusChanged();
 
     if (m_freshEdit) {
-        m_mdHighlighter->updateHighlight();
+        m_pegHighlighter->updateHighlight();
         relayout();
     } else {
-        updateHeaders(m_mdHighlighter->getHeaderRegions());
+        updateHeaders(m_pegHighlighter->getHeaderRegions());
     }
 }
 
@@ -156,11 +190,13 @@ void VMdEditor::reloadFile()
     const QString &content = m_file->getContent();
     setPlainText(content);
     setModified(false);
-    m_mdHighlighter->updateHighlightFast();
+    m_pegHighlighter->updateHighlightFast();
 
     m_freshEdit = true;
 
     setReadOnly(readonly);
+
+    refreshPreview();
 }
 
 bool VMdEditor::scrollToBlock(int p_blockNumber)
@@ -176,7 +212,7 @@ bool VMdEditor::scrollToBlock(int p_blockNumber)
 }
 
 // Get the visual offset of a block.
-#define GETVISUALOFFSETY (contentOffsetY() + (int)rect.y())
+#define GETVISUALOFFSETY(x) (contentOffsetY() + (int)(x).y())
 
 void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
 {
@@ -199,9 +235,9 @@ void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
     bool moved = false;
 
     QAbstractTextDocumentLayout *layout = document()->documentLayout();
-    QRectF rect = layout->blockBoundingRect(p_block);
-    int y = GETVISUALOFFSETY;
-    int rectHeight = (int)rect.height();
+    QRectF rt = layout->blockBoundingRect(p_block);
+    int y = GETVISUALOFFSETY(rt);
+    int rectHeight = (int)rt.height();
 
     // Handle the case rectHeight >= height.
     if (rectHeight >= height) {
@@ -210,18 +246,18 @@ void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
             while (y + rectHeight < height && vbar->value() > vbar->minimum()) {
                 moved = true;
                 vbar->setValue(vbar->value() - vbar->singleStep());
-                rect = layout->blockBoundingRect(p_block);
-                rectHeight = (int)rect.height();
-                y = GETVISUALOFFSETY;
+                rt = layout->blockBoundingRect(p_block);
+                rectHeight = (int)rt.height();
+                y = GETVISUALOFFSETY(rt);
             }
         } else if (y > 0) {
             // Need to scroll down.
             while (y > 0 && vbar->value() < vbar->maximum()) {
                 moved = true;
                 vbar->setValue(vbar->value() + vbar->singleStep());
-                rect = layout->blockBoundingRect(p_block);
-                rectHeight = (int)rect.height();
-                y = GETVISUALOFFSETY;
+                rt = layout->blockBoundingRect(p_block);
+                rectHeight = (int)rt.height();
+                y = GETVISUALOFFSETY(rt);
             }
 
             if (y < 0) {
@@ -231,60 +267,44 @@ void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
             }
         }
 
-        if (moved) {
-            qDebug() << "scroll to make huge block visible";
-        }
-
         return;
     }
 
+    // There is an extra line leading in the layout, so there will always be a scroll
+    // action to scroll the page down.
     while (y < 0 && vbar->value() > vbar->minimum()) {
         moved = true;
         vbar->setValue(vbar->value() - vbar->singleStep());
-        rect = layout->blockBoundingRect(p_block);
-        rectHeight = (int)rect.height();
-        y = GETVISUALOFFSETY;
+        rt = layout->blockBoundingRect(p_block);
+        y = GETVISUALOFFSETY(rt);
     }
 
     if (moved) {
-        qDebug() << "scroll page down to make block visible";
         return;
     }
 
     while (y + rectHeight > height && vbar->value() < vbar->maximum()) {
         moved = true;
         vbar->setValue(vbar->value() + vbar->singleStep());
-        rect = layout->blockBoundingRect(p_block);
-        rectHeight = (int)rect.height();
-        y = GETVISUALOFFSETY;
-    }
-
-    if (moved) {
-        qDebug() << "scroll page up to make block visible";
+        rt = layout->blockBoundingRect(p_block);
+        rectHeight = (int)rt.height();
+        y = GETVISUALOFFSETY(rt);
     }
 }
 
 void VMdEditor::contextMenuEvent(QContextMenuEvent *p_event)
 {
-    QMenu *menu = createStandardContextMenu();
+    QScopedPointer<QMenu> menu(createStandardContextMenu());
     menu->setToolTipsVisible(true);
-
-    VEditTab *editTab = dynamic_cast<VEditTab *>(parent());
-    Q_ASSERT(editTab);
-    if (editTab->isEditMode()) {
+    if (m_editTab && m_editTab->isEditMode()) {
         const QList<QAction *> actions = menu->actions();
 
         if (textCursor().hasSelection()) {
-            QAction *copyAsHtmlAct = new QAction(tr("Copy As &HTML without Background"), menu);
-            copyAsHtmlAct->setToolTip(tr("Copy selected contents as HTML without background styles"));
-            connect(copyAsHtmlAct, &QAction::triggered,
-                    this, &VMdEditor::handleCopyAsHtmlAction);
-
-            menu->insertAction(actions.isEmpty() ? NULL : actions[0], copyAsHtmlAct);
+            initCopyAsMenu(actions.isEmpty() ? NULL : actions.last(), menu.data());
         } else {
             QAction *saveExitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/save_exit.svg"),
                                                tr("&Save Changes And Read"),
-                                               menu);
+                                               menu.data());
             saveExitAct->setToolTip(tr("Save changes and exit edit mode"));
             connect(saveExitAct, &QAction::triggered,
                     this, [this]() {
@@ -293,24 +313,39 @@ void VMdEditor::contextMenuEvent(QContextMenuEvent *p_event)
 
             QAction *discardExitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/discard_exit.svg"),
                                                   tr("&Discard Changes And Read"),
-                                                  menu);
+                                                  menu.data());
             discardExitAct->setToolTip(tr("Discard changes and exit edit mode"));
             connect(discardExitAct, &QAction::triggered,
                     this, [this]() {
                         emit m_object->discardAndRead();
                     });
 
-            menu->insertAction(actions.isEmpty() ? NULL : actions[0], discardExitAct);
+            QAction *toggleLivePreviewAct = new QAction(tr("Live Preview for Diagrams"), menu.data());
+            toggleLivePreviewAct->setToolTip(tr("Toggle live preview panel for diagrams"));
+            connect(toggleLivePreviewAct, &QAction::triggered,
+                    this, [this]() {
+                        m_editTab->toggleLivePreview();
+                    });
+
+            menu->insertAction(actions.isEmpty() ? NULL : actions[0], toggleLivePreviewAct);
+            menu->insertAction(toggleLivePreviewAct, discardExitAct);
             menu->insertAction(discardExitAct, saveExitAct);
+
+            menu->insertSeparator(toggleLivePreviewAct);
+
+            if (!actions.isEmpty()) {
+                menu->insertSeparator(actions[0]);
+            }
         }
 
-        if (!actions.isEmpty()) {
-            menu->insertSeparator(actions[0]);
+        QClipboard *clipboard = QApplication::clipboard();
+        const QMimeData *mimeData = clipboard->mimeData();
+        if (mimeData->hasText()) {
+            initPasteAsBlockQuoteMenu(menu.data());
         }
     }
 
     menu->exec(p_event->globalPos());
-    delete menu;
 }
 
 void VMdEditor::mousePressEvent(QMouseEvent *p_event)
@@ -375,9 +410,9 @@ bool VMdEditor::isBlockVisible(const QTextBlock &p_block)
     }
 
     QAbstractTextDocumentLayout *layout = document()->documentLayout();
-    QRectF rect = layout->blockBoundingRect(p_block);
-    int y = GETVISUALOFFSETY;
-    int rectHeight = (int)rect.height();
+    QRectF rt = layout->blockBoundingRect(p_block);
+    int y = GETVISUALOFFSETY(rt);
+    int rectHeight = (int)rt.height();
 
     return (y >= 0 && y < height) || (y < 0 && y + rectHeight > 0);
 }
@@ -412,7 +447,8 @@ static QString headerSequenceStr(const QVector<int> &p_sequence)
     return res;
 }
 
-static void insertSequenceToHeader(QTextBlock p_block,
+static void insertSequenceToHeader(QTextCursor& p_cursor,
+                                   const QTextBlock &p_block,
                                    QRegExp &p_reg,
                                    QRegExp &p_preReg,
                                    const QString &p_seq)
@@ -433,20 +469,24 @@ static void insertSequenceToHeader(QTextBlock p_block,
 
     Q_ASSERT(start <= end);
 
-    QTextCursor cursor(p_block);
-    cursor.setPosition(p_block.position() + start);
+    p_cursor.setPosition(p_block.position() + start);
     if (start != end) {
-        cursor.setPosition(p_block.position() + end, QTextCursor::KeepAnchor);
+        p_cursor.setPosition(p_block.position() + end, QTextCursor::KeepAnchor);
     }
 
     if (p_seq.isEmpty()) {
-        cursor.removeSelectedText();
+        p_cursor.removeSelectedText();
     } else {
-        cursor.insertText(p_seq + ' ');
+        p_cursor.insertText(p_seq + ' ');
     }
 }
 
-void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
+void VMdEditor::updateHeaderSequenceByConfigChange()
+{
+    updateHeadersHelper(m_pegHighlighter->getHeaderRegions(), true);
+}
+
+void VMdEditor::updateHeadersHelper(const QVector<VElementRegion> &p_headerRegions, bool p_configChanged)
 {
     QTextDocument *doc = document();
 
@@ -475,8 +515,7 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
                        << block.text();
         }
 
-        if ((block.userState() == HighlightBlockState::Normal)
-            && headerReg.exactMatch(block.text())) {
+        if (headerReg.exactMatch(block.text())) {
             int level = headerReg.cap(1).length();
             VTableOfContentItem header(headerReg.cap(2).trimmed(),
                                        level,
@@ -507,6 +546,11 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
     QVector<int> seqs(7, 0);
     QRegExp preReg(VUtils::c_headerPrefixRegExp);
     int curLevel = baseLevel - 1;
+    QTextCursor cursor(doc);
+    if(autoSequence || p_configChanged) {
+        cursor.beginEditBlock();
+    }
+
     for (int i = 0; i < headers.size(); ++i) {
         VTableOfContentItem &item = headers[i];
         while (item.m_level > curLevel + 1) {
@@ -517,7 +561,7 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
                                                  curLevel,
                                                  -1,
                                                  m_headers.size()));
-            if (autoSequence) {
+            if (autoSequence || p_configChanged) {
                 addHeaderSequence(seqs, curLevel, headingSequenceBaseLevel);
             }
         }
@@ -525,13 +569,14 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
         item.m_index = m_headers.size();
         m_headers.append(item);
         curLevel = item.m_level;
-        if (autoSequence) {
+        if (autoSequence || p_configChanged) {
             addHeaderSequence(seqs, item.m_level, headingSequenceBaseLevel);
 
-            QString seqStr = headerSequenceStr(seqs);
+            QString seqStr = autoSequence ? headerSequenceStr(seqs) : "";
             if (headerSequences[i] != seqStr) {
                 // Insert correct sequence.
-                insertSequenceToHeader(doc->findBlockByNumber(headerBlockNumbers[i]),
+                insertSequenceToHeader(cursor,
+                                       doc->findBlockByNumber(headerBlockNumbers[i]),
                                        headerReg,
                                        preReg,
                                        seqStr);
@@ -539,9 +584,18 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
         }
     }
 
+    if (autoSequence || p_configChanged) {
+        cursor.endEditBlock();
+    }
+
     emit headersChanged(m_headers);
 
     updateCurrentHeader();
+}
+
+void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
+{
+    updateHeadersHelper(p_headerRegions, false);
 }
 
 void VMdEditor::updateCurrentHeader()
@@ -667,8 +721,9 @@ void VMdEditor::clearUnusedImages()
 
 void VMdEditor::keyPressEvent(QKeyEvent *p_event)
 {
+    int key = p_event->key();
     int modifiers = p_event->modifiers();
-    switch (p_event->key()) {
+    switch (key) {
     case Qt::Key_Minus:
     case Qt::Key_Underscore:
         // Zoom out.
@@ -711,6 +766,12 @@ void VMdEditor::keyPressEvent(QKeyEvent *p_event)
         return;
     }
 
+    // Esc to exit edit mode when Vim is disabled.
+    if (key == Qt::Key_Escape) {
+        emit m_object->discardAndRead();
+        return;
+    }
+
     VTextEdit::keyPressEvent(p_event);
 }
 
@@ -723,18 +784,57 @@ bool VMdEditor::canInsertFromMimeData(const QMimeData *p_source) const
 
 void VMdEditor::insertFromMimeData(const QMimeData *p_source)
 {
+    if (p_source->hasHtml()) {
+        // Handle <img>.
+        QRegExp reg("<img ([^>]*)src=\"([^\"]+)\"([^>]*)>");
+        QString html(p_source->html());
+        if (reg.indexIn(html) != -1 && VUtils::onlyHasImgInHtml(html)) {
+            if (p_source->hasImage()) {
+                // Both image data and URL are embedded.
+                VSelectDialog dialog(tr("Insert From Clipboard"), this);
+                dialog.addSelection(tr("Insert From URL"), 0);
+                dialog.addSelection(tr("Insert From Image Data"), 1);
+                dialog.addSelection(tr("Insert As Image Link"), 2);
+
+                if (dialog.exec() == QDialog::Accepted) {
+                    int selection = dialog.getSelection();
+                    if (selection == 1) {
+                        // Insert from image data.
+                        m_editOps->insertImageFromMimeData(p_source);
+                        return;
+                    } else if (selection == 2) {
+                        // Insert as link.
+                        insertImageLink("", reg.cap(2));
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+
+            m_editOps->insertImageFromURL(QUrl(reg.cap(2)));
+            return;
+        }
+    }
+
     VSelectDialog dialog(tr("Insert From Clipboard"), this);
     dialog.addSelection(tr("Insert As Image"), 0);
     dialog.addSelection(tr("Insert As Text"), 1);
+    dialog.addSelection(tr("Insert As Image Link"), 2);
 
     if (p_source->hasImage()) {
         // Image data in the clipboard
         if (p_source->hasText()) {
             if (dialog.exec() == QDialog::Accepted) {
-                if (dialog.getSelection() == 1) {
+                int selection = dialog.getSelection();
+                if (selection == 1) {
                     // Insert as text.
                     Q_ASSERT(p_source->hasText() && p_source->hasImage());
                     VTextEdit::insertFromMimeData(p_source);
+                    return;
+                } else if (selection == 2) {
+                    // Insert as link.
+                    insertImageLink("", p_source->text());
                     return;
                 }
             } else {
@@ -744,14 +844,21 @@ void VMdEditor::insertFromMimeData(const QMimeData *p_source)
 
         m_editOps->insertImageFromMimeData(p_source);
         return;
-    } else if (p_source->hasUrls()) {
+    }
+
+    if (p_source->hasUrls()) {
         QList<QUrl> urls = p_source->urls();
         if (urls.size() == 1 && VUtils::isImageURL(urls[0])) {
             if (dialog.exec() == QDialog::Accepted) {
                 // FIXME: After calling dialog.exec(), p_source->hasUrl() returns false.
-                if (dialog.getSelection() == 0) {
+                int selection = dialog.getSelection();
+                if (selection == 0) {
                     // Insert as image.
                     m_editOps->insertImageFromURL(urls[0]);
+                    return;
+                } else if (selection == 2) {
+                    // Insert as link.
+                    insertImageLink("", urls[0].toString(QUrl::FullyEncoded));
                     return;
                 }
 
@@ -763,17 +870,31 @@ void VMdEditor::insertFromMimeData(const QMimeData *p_source)
                 return;
             }
         }
-    } else if (p_source->hasText()) {
+    }
+
+    if (p_source->hasText()) {
         QString text = p_source->text();
         if (VUtils::isImageURLText(text)) {
             // The text is a URL to an image.
             if (dialog.exec() == QDialog::Accepted) {
-                if (dialog.getSelection() == 0) {
+                int selection = dialog.getSelection();
+                if (selection == 0) {
                     // Insert as image.
-                    QUrl url(text);
-                    if (url.isValid()) {
-                        m_editOps->insertImageFromURL(QUrl(text));
+                    QUrl url;
+                    if (QFileInfo::exists(text)) {
+                        url = QUrl::fromLocalFile(text);
+                    } else {
+                        url = QUrl(text);
                     }
+
+                    if (url.isValid()) {
+                        m_editOps->insertImageFromURL(url);
+                    }
+
+                    return;
+                } else if (selection == 2) {
+                    // Insert as link.
+                    insertImageLink("", text);
                     return;
                 }
             } else {
@@ -1042,8 +1163,10 @@ void VMdEditor::updateInitAndInsertedImages(bool p_fileChanged, UpdateAction p_a
     }
 }
 
-void VMdEditor::handleCopyAsHtmlAction()
+void VMdEditor::handleCopyAsAction(QAction *p_act)
 {
+    ++m_copyTimeStamp;
+
     QTextCursor cursor = textCursor();
     Q_ASSERT(cursor.hasSelection());
 
@@ -1051,10 +1174,10 @@ void VMdEditor::handleCopyAsHtmlAction()
     Q_ASSERT(!text.isEmpty());
 
     Q_ASSERT(!m_textToHtmlDialog);
-    m_textToHtmlDialog = new VCopyTextAsHtmlDialog(text, this);
+    m_textToHtmlDialog = new VCopyTextAsHtmlDialog(text, p_act->data().toString(), this);
 
     // For Hoedown, we use marked.js to convert the text to have a general interface.
-    emit requestTextToHtml(text);
+    emit requestTextToHtml(text, 0, m_copyTimeStamp);
 
     m_textToHtmlDialog->exec();
 
@@ -1062,11 +1185,13 @@ void VMdEditor::handleCopyAsHtmlAction()
     m_textToHtmlDialog = NULL;
 }
 
-void VMdEditor::textToHtmlFinished(const QString &p_text,
+void VMdEditor::textToHtmlFinished(int p_id,
+                                   int p_timeStamp,
                                    const QUrl &p_baseUrl,
                                    const QString &p_html)
 {
-    if (m_textToHtmlDialog && m_textToHtmlDialog->getText() == p_text) {
+    Q_UNUSED(p_id);
+    if (m_textToHtmlDialog && p_timeStamp == m_copyTimeStamp) {
         m_textToHtmlDialog->setConvertedHtml(p_baseUrl, p_html);
     }
 }
@@ -1095,7 +1220,7 @@ void VMdEditor::zoomPage(bool p_zoomIn, int p_range)
 
     m_zoomDelta += delta;
 
-    QVector<HighlightingStyle> &styles = m_mdHighlighter->getHighlightingStyles();
+    QVector<HighlightingStyle> &styles = m_pegHighlighter->getStyles();
     for (auto & it : styles) {
         int size = it.format.fontPointSize();
         if (size == 0) {
@@ -1111,7 +1236,7 @@ void VMdEditor::zoomPage(bool p_zoomIn, int p_range)
         it.format.setFontPointSize(size);
     }
 
-    QHash<QString, QTextCharFormat> &cbStyles = m_mdHighlighter->getCodeBlockStyles();
+    QHash<QString, QTextCharFormat> &cbStyles = m_pegHighlighter->getCodeBlockStyles();
     for (auto it = cbStyles.begin(); it != cbStyles.end(); ++it) {
         int size = it.value().fontPointSize();
         if (size == 0) {
@@ -1127,5 +1252,135 @@ void VMdEditor::zoomPage(bool p_zoomIn, int p_range)
         it.value().setFontPointSize(size);
     }
 
-    m_mdHighlighter->rehighlight();
+    m_pegHighlighter->rehighlight();
+}
+
+void VMdEditor::initCopyAsMenu(QAction *p_before, QMenu *p_menu)
+{
+    QStringList targets = g_webUtils->getCopyTargetsName();
+    if (targets.isEmpty()) {
+        return;
+    }
+
+    QMenu *subMenu = new QMenu(tr("Copy HTML As"), p_menu);
+    subMenu->setToolTipsVisible(true);
+    for (auto const & target : targets) {
+        QAction *act = new QAction(target, subMenu);
+        act->setData(target);
+        act->setToolTip(tr("Copy selected content as HTML using rules specified by target %1").arg(target));
+
+        subMenu->addAction(act);
+    }
+
+    connect(subMenu, &QMenu::triggered,
+            this, &VMdEditor::handleCopyAsAction);
+
+    QAction *menuAct = p_menu->insertMenu(p_before, subMenu);
+    if (p_before) {
+        p_menu->removeAction(p_before);
+        p_menu->insertAction(menuAct, p_before);
+        p_menu->insertSeparator(menuAct);
+    }
+}
+
+void VMdEditor::initPasteAsBlockQuoteMenu(QMenu *p_menu)
+{
+    QAction *pbqAct = new QAction(tr("Paste As Block &Quote"), p_menu);
+    pbqAct->setToolTip(tr("Paste text from clipboard as block quote"));
+    connect(pbqAct, &QAction::triggered,
+            this, [this]() {
+                QClipboard *clipboard = QApplication::clipboard();
+                const QMimeData *mimeData = clipboard->mimeData();
+                QString text = mimeData->text();
+
+                QTextCursor cursor = textCursor();
+                cursor.removeSelectedText();
+                QTextBlock block = cursor.block();
+                QString indent = VEditUtils::fetchIndentSpaces(block);
+
+                // Insert '> ' in front of each line.
+                VEditUtils::insertBeforeEachLine(text, indent + QStringLiteral("> "));
+
+                if (VEditUtils::isSpaceBlock(block)) {
+                    if (!indent.isEmpty()) {
+                        // Remove the indent.
+                        cursor.movePosition(QTextCursor::StartOfBlock);
+                        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+                        cursor.removeSelectedText();
+                    }
+                } else {
+                    // Insert a new block.
+                    VEditUtils::insertBlock(cursor, false);
+                }
+
+                cursor.insertText(text);
+                setTextCursor(cursor);
+            });
+
+    p_menu->addSeparator();
+    p_menu->addAction(pbqAct);
+}
+
+void VMdEditor::insertImageLink(const QString &p_text, const QString &p_url)
+{
+    VInsertLinkDialog dialog(tr("Insert Image Link"),
+                             "",
+                             "",
+                             p_text,
+                             p_url,
+                             true,
+                             this);
+    if (dialog.exec() == QDialog::Accepted) {
+        QString linkText = dialog.getLinkText();
+        QString linkUrl = dialog.getLinkUrl();
+        static_cast<VMdEditOperations *>(m_editOps)->insertImageLink(linkText, linkUrl);
+    }
+}
+
+VWordCountInfo VMdEditor::fetchWordCountInfo() const
+{
+    VWordCountInfo info;
+    QTextDocument *doc = document();
+
+    // Char without spaces.
+    int cns = 0;
+    int wc = 0;
+    // Remove th ending new line.
+    int cc = doc->characterCount() - 1;
+    // 0 - not in word;
+    // 1 - in English word;
+    // 2 - in non-English word;
+    int state = 0;
+
+    for (int i = 0; i < cc; ++i) {
+        QChar ch = doc->characterAt(i);
+        if (ch.isSpace()) {
+            if (state) {
+                state = 0;
+            }
+
+            continue;
+        } else if (ch.unicode() < 128) {
+            if (state != 1) {
+                state = 1;
+                ++wc;
+            }
+        } else {
+            state = 2;
+            ++wc;
+        }
+
+        ++cns;
+    }
+
+    info.m_mode = VWordCountInfo::Edit;
+    info.m_wordCount = wc;
+    info.m_charWithoutSpacesCount = cns;
+    info.m_charWithSpacesCount = cc;
+    return info;
+}
+
+void VMdEditor::setEditTab(VEditTab *p_editTab)
+{
+    m_editTab = p_editTab;
 }

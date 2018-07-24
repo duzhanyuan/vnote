@@ -1,19 +1,117 @@
 #include "vtabindicator.h"
 
-#include <QLabel>
-#include <QHBoxLayout>
+#include <QtWidgets>
 
 #include "vedittab.h"
 #include "vorphanfile.h"
+#include "vbuttonwithwidget.h"
+#include "vwordcountinfo.h"
+#include "utils/vutils.h"
+#include "vtagpanel.h"
+#include "vnotefile.h"
+#include "vmainwindow.h"
+#include "vcaptain.h"
+
+extern VMainWindow *g_mainWin;
+
+VWordCountPanel::VWordCountPanel(QWidget *p_parent)
+    : QWidget(p_parent)
+{
+    m_wordLabel = new QLabel();
+    m_wordLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_charWithoutSpacesLabel = new QLabel();
+    m_charWithoutSpacesLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_charWithSpacesLabel = new QLabel();
+    m_charWithSpacesLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    QFormLayout *readLayout = new QFormLayout();
+    readLayout->addRow(tr("Words"), m_wordLabel);
+    readLayout->addRow(tr("Characters (no spaces)"), m_charWithoutSpacesLabel);
+    readLayout->addRow(tr("Characters (with spaces)"), m_charWithSpacesLabel);
+    m_readBox = new QGroupBox(tr("Read"));
+    m_readBox->setLayout(readLayout);
+
+    m_wordEditLabel = new QLabel();
+    m_wordEditLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_charWithoutSpacesEditLabel = new QLabel();
+    m_charWithoutSpacesEditLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_charWithSpacesEditLabel = new QLabel();
+    m_charWithSpacesEditLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    QLabel *cwsLabel = new QLabel(tr("Characters (with spaces)"));
+    cwsLabel->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Preferred);
+
+    QFormLayout *editLayout = new QFormLayout();
+    editLayout->addRow(tr("Words"), m_wordEditLabel);
+    editLayout->addRow(tr("Characters (no spaces)"), m_charWithoutSpacesEditLabel);
+    editLayout->addRow(cwsLabel, m_charWithSpacesEditLabel);
+    m_editBox = new QGroupBox(tr("Edit"));
+    m_editBox->setLayout(editLayout);
+
+    QLabel *titleLabel = new QLabel(tr("Word Count"));
+    titleLabel->setProperty("TitleLabel", true);
+    QVBoxLayout *mainLayout = new QVBoxLayout();
+    mainLayout->addWidget(titleLabel);
+    mainLayout->addWidget(m_readBox);
+    mainLayout->addWidget(m_editBox);
+
+    setLayout(mainLayout);
+}
+
+void VWordCountPanel::updateReadInfo(const VWordCountInfo &p_readInfo)
+{
+    if (p_readInfo.isNull()) {
+        m_wordLabel->clear();
+        m_charWithoutSpacesLabel->clear();
+        m_charWithSpacesLabel->clear();
+    } else {
+        m_wordLabel->setText(QString::number(p_readInfo.m_wordCount));
+        m_charWithoutSpacesLabel->setText(QString::number(p_readInfo.m_charWithoutSpacesCount));
+        m_charWithSpacesLabel->setText(QString::number(p_readInfo.m_charWithSpacesCount));
+    }
+}
+
+void VWordCountPanel::updateEditInfo(const VWordCountInfo &p_editInfo)
+{
+    if (p_editInfo.isNull()) {
+        m_wordEditLabel->clear();
+        m_charWithoutSpacesEditLabel->clear();
+        m_charWithSpacesEditLabel->clear();
+    } else {
+        m_wordEditLabel->setText(QString::number(p_editInfo.m_wordCount));
+        m_charWithoutSpacesEditLabel->setText(QString::number(p_editInfo.m_charWithoutSpacesCount));
+        m_charWithSpacesEditLabel->setText(QString::number(p_editInfo.m_charWithSpacesCount));
+    }
+}
+
+void VWordCountPanel::clear()
+{
+    m_wordLabel->clear();
+    m_charWithoutSpacesLabel->clear();
+    m_charWithSpacesLabel->clear();
+
+    m_wordEditLabel->clear();
+    m_charWithoutSpacesEditLabel->clear();
+    m_charWithSpacesEditLabel->clear();
+}
+
 
 VTabIndicator::VTabIndicator(QWidget *p_parent)
-    : QWidget(p_parent)
+    : QWidget(p_parent),
+      m_editTab(NULL)
 {
     setupUI();
 }
 
+void VTabIndicator::registerNavigationTarget()
+{
+    g_mainWin->getCaptain()->registerNavigationTarget(m_tagPanel);
+}
+
 void VTabIndicator::setupUI()
 {
+    m_tagPanel = new VTagPanel(this);
+
     m_docTypeLabel = new QLabel(this);
     m_docTypeLabel->setToolTip(tr("The type of the file"));
     m_docTypeLabel->setProperty("ColorGreyLabel", true);
@@ -33,8 +131,20 @@ void VTabIndicator::setupUI()
     m_cursorLabel = new QLabel(this);
     m_cursorLabel->setProperty("TabIndicatorLabel", true);
 
+    m_wordCountPanel = new VWordCountPanel(this);
+    m_wordCountPanel->setMinimumWidth(300 * VUtils::calculateScaleFactor());
+
+    m_wordCountBtn = new VButtonWithWidget(tr("[W]"), m_wordCountPanel, this);
+    m_wordCountBtn->setToolTip(tr("Word Count Information"));
+    m_wordCountBtn->setProperty("StatusBtn", true);
+    m_wordCountBtn->setFocusPolicy(Qt::NoFocus);
+    connect(m_wordCountBtn, &VButtonWithWidget::popupWidgetAboutToShow,
+            this, &VTabIndicator::updateWordCountInfo);
+
     QHBoxLayout *mainLayout = new QHBoxLayout(this);
+    mainLayout->addWidget(m_tagPanel);
     mainLayout->addWidget(m_cursorLabel);
+    mainLayout->addWidget(m_wordCountBtn);
     mainLayout->addWidget(m_externalLabel);
     mainLayout->addWidget(m_systemLabel);
     mainLayout->addWidget(m_readonlyLabel);
@@ -75,24 +185,24 @@ static QString docTypeToString(DocType p_type)
 
 void VTabIndicator::update(const VEditTabInfo &p_info)
 {
-    const VEditTab *editTab = NULL;
-    const VFile *file = NULL;
+    VFile *file = NULL;
     DocType docType = DocType::Html;
     bool readonly = false;
     bool external = false;
     bool system = false;
     QString cursorStr;
 
-    if (p_info.m_editTab)
+    m_editTab = p_info.m_editTab;
+
+    if (m_editTab)
     {
-        editTab = p_info.m_editTab;
-        file = editTab->getFile();
+        file = m_editTab->getFile();
         docType = file->getDocType();
         readonly = !file->isModifiable();
         external = file->getType() == FileType::Orphan;
-        system = external && dynamic_cast<const VOrphanFile *>(file)->isSystemFile();
+        system = external && dynamic_cast<VOrphanFile *>(file)->isSystemFile();
 
-        if (editTab->isEditMode()) {
+        if (m_editTab->isEditMode()) {
             int line = p_info.m_cursorBlockNumber + 1;
             int col = p_info.m_cursorPositionInBlock;
             if (col < 0) {
@@ -113,8 +223,78 @@ void VTabIndicator::update(const VEditTabInfo &p_info)
         }
     }
 
+    m_tagPanel->setVisible(!external);
+    if (external) {
+        m_tagPanel->updateTags(NULL);
+    } else {
+        m_tagPanel->updateTags(dynamic_cast<VNoteFile *>(file));
+    }
+
+    updateWordCountBtn(p_info);
+
+    if (p_info.m_wordCountInfo.m_mode == VWordCountInfo::Read) {
+        m_wordCountPanel->updateReadInfo(p_info.m_wordCountInfo);
+    }
+
     m_docTypeLabel->setText(docTypeToString(docType));
     m_readonlyLabel->setVisible(readonly);
     m_externalLabel->setVisible(external);
     m_systemLabel->setVisible(system);
+}
+
+void VTabIndicator::updateWordCountInfo(QWidget *p_widget)
+{
+    VWordCountPanel *wcp = dynamic_cast<VWordCountPanel *>(p_widget);
+
+    if (!m_editTab) {
+        wcp->clear();
+        return;
+    }
+
+    wcp->updateReadInfo(m_editTab->fetchWordCountInfo(false));
+    wcp->updateEditInfo(m_editTab->fetchWordCountInfo(true));
+}
+
+void VTabIndicator::updateWordCountBtn(const VEditTabInfo &p_info)
+{
+    const VEditTab *editTab = p_info.m_editTab;
+    if (!editTab) {
+        m_wordCountBtn->setText(tr("[W]"));
+        return;
+    }
+
+    const VWordCountInfo &wci = p_info.m_wordCountInfo;
+    bool editMode = editTab->isEditMode();
+    int wc = -1;
+    bool needUpdate = false;
+    switch (wci.m_mode) {
+    case VWordCountInfo::Read:
+        if (!editMode) {
+            wc = wci.m_wordCount;
+            needUpdate = true;
+        }
+
+        break;
+
+    case VWordCountInfo::Edit:
+        if (editMode) {
+            wc = wci.m_charWithSpacesCount;
+            needUpdate = true;
+        }
+
+        break;
+
+    case VWordCountInfo::Invalid:
+        needUpdate = true;
+        break;
+
+    default:
+        break;
+    }
+
+    if (needUpdate) {
+        QString text = tr("[%1]%2").arg(editMode ? tr("C") : tr("W"))
+                                   .arg(wc > -1 ? QString::number(wc) : "");
+        m_wordCountBtn->setText(text);
+    }
 }

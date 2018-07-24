@@ -5,7 +5,6 @@
 #include <QPainter>
 #include <QResizeEvent>
 
-#include "vtextdocumentlayout.h"
 #include "vimageresourcemanager2.h"
 
 #define VIRTUAL_CURSOR_BLOCK_WIDTH 8
@@ -36,14 +35,14 @@ VTextEdit::VTextEdit(const QString &p_text, QWidget *p_parent)
 
 VTextEdit::~VTextEdit()
 {
-    if (m_imageMgr) {
-        delete m_imageMgr;
-    }
+    delete m_imageMgr;
 }
 
 void VTextEdit::init()
 {
     setAcceptRichText(false);
+
+    m_defaultCursorWidth = 1;
 
     m_lineNumberType = LineNumberType::None;
 
@@ -62,6 +61,8 @@ void VTextEdit::init()
 
     docLayout->setVirtualCursorBlockWidth(VIRTUAL_CURSOR_BLOCK_WIDTH);
 
+    docLayout->setCursorWidth(m_defaultCursorWidth);
+
     connect(docLayout, &VTextDocumentLayout::cursorBlockWidthUpdated,
             this, [this](int p_width) {
                 if (p_width != cursorWidth()
@@ -73,7 +74,6 @@ void VTextEdit::init()
     m_lineNumberArea = new VLineNumberArea(this,
                                            document(),
                                            fontMetrics().width(QLatin1Char('8')),
-                                           fontMetrics().height(),
                                            this);
     connect(doc, &QTextDocument::blockCountChanged,
             this, &VTextEdit::updateLineNumberAreaMargin);
@@ -140,7 +140,7 @@ void VTextEdit::paintLineNumberArea(QPaintEvent *p_event)
     int bottom = top + (int)rect.height();
     int eventTop = p_event->rect().top();
     int eventBtm = p_event->rect().bottom();
-    const int digitHeight = m_lineNumberArea->getDigitHeight();
+    const int digitHeight = painter.fontMetrics().height();
     const int curBlockNumber = textCursor().block().blockNumber();
     painter.setPen(m_lineNumberArea->getForegroundColor());
     const int leading = (int)layout->getLineLeading();
@@ -187,7 +187,7 @@ void VTextEdit::paintLineNumberArea(QPaintEvent *p_event)
                                      top + leading,
                                      m_lineNumberArea->width(),
                                      digitHeight,
-                                     Qt::AlignRight,
+                                     Qt::AlignRight | Qt::AlignTop,
                                      numberStr);
                 }
 
@@ -233,7 +233,7 @@ void VTextEdit::paintLineNumberArea(QPaintEvent *p_event)
                              top + leading,
                              m_lineNumberArea->width(),
                              digitHeight,
-                             Qt::AlignRight,
+                             Qt::AlignRight | Qt::AlignTop,
                              numberStr);
 
             if (currentLine) {
@@ -277,12 +277,35 @@ void VTextEdit::updateLineNumberArea()
     }
 }
 
+int VTextEdit::firstVisibleBlockNumber() const
+{
+    VTextDocumentLayout *layout = getLayout();
+    Q_ASSERT(layout);
+    return layout->findBlockByPosition(QPointF(0, -contentOffsetY()));
+}
+
 QTextBlock VTextEdit::firstVisibleBlock() const
 {
     VTextDocumentLayout *layout = getLayout();
     Q_ASSERT(layout);
     int blockNumber = layout->findBlockByPosition(QPointF(0, -contentOffsetY()));
     return document()->findBlockByNumber(blockNumber);
+}
+
+QTextBlock VTextEdit::lastVisibleBlock() const
+{
+    VTextDocumentLayout *layout = getLayout();
+    Q_ASSERT(layout);
+    int blockNumber = layout->findBlockByPosition(QPointF(0, -contentOffsetY() + contentsRect().height()));
+    return document()->findBlockByNumber(blockNumber);
+}
+
+void VTextEdit::visibleBlockRange(int &p_first, int &p_last) const
+{
+    VTextDocumentLayout *layout = getLayout();
+    Q_ASSERT(layout);
+    p_first = layout->findBlockByPosition(QPointF(0, -contentOffsetY()));
+    p_last = layout->findBlockByPosition(QPointF(0, -contentOffsetY() + contentsRect().height()));
 }
 
 int VTextEdit::contentOffsetY() const
@@ -298,9 +321,26 @@ void VTextEdit::clearBlockImages()
     getLayout()->relayout();
 }
 
-void VTextEdit::relayout(const QSet<int> &p_blocks)
+void VTextEdit::relayout(const OrderedIntSet &p_blocks)
 {
     getLayout()->relayout(p_blocks);
+
+    updateLineNumberArea();
+}
+
+void VTextEdit::relayoutVisibleBlocks()
+{
+    int first, last;
+    visibleBlockRange(first, last);
+    OrderedIntSet blocks;
+
+    for (int i = first; i <= last; ++i) {
+        blocks.insert(i, QMapDummyValue());
+    }
+
+    getLayout()->relayout(blocks);
+
+    updateLineNumberArea();
 }
 
 bool VTextEdit::containsImage(const QString &p_imageName) const
@@ -357,12 +397,15 @@ void VTextEdit::setImageLineColor(const QColor &p_color)
 
 void VTextEdit::setCursorBlockMode(CursorBlock p_mode)
 {
+    VTextDocumentLayout *layout = getLayout();
+
     if (p_mode != m_cursorBlockMode) {
         m_cursorBlockMode = p_mode;
-        getLayout()->setCursorBlockMode(m_cursorBlockMode);
-        getLayout()->clearLastCursorBlockWidth();
+        layout->setCursorBlockMode(m_cursorBlockMode);
+        layout->clearLastCursorBlockWidth();
         setCursorWidth(m_cursorBlockMode != CursorBlock::None ? VIRTUAL_CURSOR_BLOCK_WIDTH
-                                                              : 1);
+                                                              : m_defaultCursorWidth);
+        layout->updateBlockByNumber(textCursor().blockNumber());
     }
 }
 
@@ -387,4 +430,31 @@ void VTextEdit::setCursorLineBlockBg(const QColor &p_bg)
 void VTextEdit::relayout()
 {
     getLayout()->relayout();
+
+    updateLineNumberArea();
+}
+
+void VTextEdit::setDisplayScaleFactor(qreal p_factor)
+{
+    m_defaultCursorWidth = p_factor + 0.5;
+
+    setCursorWidth(m_cursorBlockMode != CursorBlock::None ? VIRTUAL_CURSOR_BLOCK_WIDTH
+                                                          : m_defaultCursorWidth);
+    getLayout()->setCursorWidth(m_defaultCursorWidth);
+}
+
+void VTextEdit::updateLineNumberAreaWidth(const QFontMetrics &p_metrics)
+{
+    m_lineNumberArea->setDigitWidth(p_metrics.width(QLatin1Char('8')));
+}
+
+void VTextEdit::dragMoveEvent(QDragMoveEvent *p_event)
+{
+    QTextEdit::dragMoveEvent(p_event);
+
+    // We need to update the cursor rect to show the cursor while dragging text.
+    // This is a work-around. We do not know why VTextEdit won't update the cursor
+    // rect to show the cursor.
+    // TODO: find out the rect of current cursor to update that rect only.
+    update();
 }

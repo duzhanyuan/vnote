@@ -12,6 +12,8 @@
 #include "dialog/vsortdialog.h"
 #include "utils/vimnavigationforwidget.h"
 #include "utils/viconutils.h"
+#include "vfilelist.h"
+#include "vhistorylist.h"
 
 extern VMainWindow *g_mainWin;
 
@@ -24,16 +26,16 @@ const QString VDirectoryTree::c_cutShortcutSequence = "Ctrl+X";
 const QString VDirectoryTree::c_pasteShortcutSequence = "Ctrl+V";
 
 VDirectoryTree::VDirectoryTree(QWidget *parent)
-    : QTreeWidget(parent), VNavigationMode(),
+    : VTreeWidget(parent),
+      VNavigationMode(),
       m_editArea(NULL)
 {
     setColumnCount(1);
     setHeaderHidden(true);
     setContextMenuPolicy(Qt::CustomContextMenu);
-    setAttribute(Qt::WA_MacShowFocusRect, false);
+    setFitContent(true);
 
     initShortcuts();
-    initActions();
 
     connect(this, SIGNAL(itemExpanded(QTreeWidgetItem*)),
             this, SLOT(handleItemExpanded(QTreeWidgetItem*)));
@@ -74,68 +76,16 @@ void VDirectoryTree::initShortcuts()
             this, [this](){
                 pasteDirectoriesFromClipboard();
             });
-}
 
-void VDirectoryTree::initActions()
-{
-    newRootDirAct = new QAction(VIconUtils::menuIcon(":/resources/icons/create_rootdir.svg"),
-                                tr("New &Root Folder"), this);
-    newRootDirAct->setToolTip(tr("Create a root folder in current notebook"));
-    connect(newRootDirAct, &QAction::triggered,
-            this, &VDirectoryTree::newRootDirectory);
-
-    newSubDirAct = new QAction(VIconUtils::menuIcon(":/resources/icons/create_subdir.svg"),
-                               tr("&New Subfolder"), this);
-    newSubDirAct->setToolTip(tr("Create a subfolder"));
-    connect(newSubDirAct, &QAction::triggered,
-            this, &VDirectoryTree::newSubDirectory);
-
-    deleteDirAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_dir.svg"),
-                               tr("&Delete"), this);
-    deleteDirAct->setToolTip(tr("Delete selected folder"));
-    connect(deleteDirAct, &QAction::triggered,
-            this, &VDirectoryTree::deleteSelectedDirectory);
-
-    dirInfoAct = new QAction(VIconUtils::menuIcon(":/resources/icons/dir_info.svg"),
-                             tr("&Info\t%1").arg(VUtils::getShortcutText(c_infoShortcutSequence)), this);
-    dirInfoAct->setToolTip(tr("View and edit current folder's information"));
-    connect(dirInfoAct, &QAction::triggered,
-            this, &VDirectoryTree::editDirectoryInfo);
-
-    copyAct = new QAction(VIconUtils::menuIcon(":/resources/icons/copy.svg"),
-                          tr("&Copy\t%1").arg(VUtils::getShortcutText(c_copyShortcutSequence)), this);
-    copyAct->setToolTip(tr("Copy selected folders"));
-    connect(copyAct, &QAction::triggered,
-            this, &VDirectoryTree::copySelectedDirectories);
-
-    cutAct = new QAction(VIconUtils::menuIcon(":/resources/icons/cut.svg"),
-                         tr("C&ut\t%1").arg(VUtils::getShortcutText(c_cutShortcutSequence)), this);
-    cutAct->setToolTip(tr("Cut selected folders"));
-    connect(cutAct, &QAction::triggered,
-            this, &VDirectoryTree::cutSelectedDirectories);
-
-    pasteAct = new QAction(VIconUtils::menuIcon(":/resources/icons/paste.svg"),
-                           tr("&Paste\t%1").arg(VUtils::getShortcutText(c_pasteShortcutSequence)), this);
-    pasteAct->setToolTip(tr("Paste folders in this folder"));
-    connect(pasteAct, &QAction::triggered,
-            this, &VDirectoryTree::pasteDirectoriesFromClipboard);
-
-    m_openLocationAct = new QAction(tr("&Open Folder Location"), this);
-    m_openLocationAct->setToolTip(tr("Open the folder containing this folder in operating system"));
-    connect(m_openLocationAct, &QAction::triggered,
-            this, &VDirectoryTree::openDirectoryLocation);
-
-    m_reloadAct = new QAction(tr("&Reload From Disk"), this);
-    m_reloadAct->setToolTip(tr("Reload the content of this folder (or notebook) from disk"));
-    connect(m_reloadAct, &QAction::triggered,
-            this, &VDirectoryTree::reloadFromDisk);
-
-    m_sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
-                            tr("&Sort"),
-                            this);
-    m_sortAct->setToolTip(tr("Sort folders in this folder/notebook manually"));
-    connect(m_sortAct, SIGNAL(triggered(bool)),
-            this, SLOT(sortItems()));
+    QKeySequence seq = QKeySequence(g_config->getShortcutKeySequence("NewSubfolder"));
+    if (!seq.isEmpty()) {
+        QShortcut *newSubDirShortcut = new QShortcut(seq, this);
+        newSubDirShortcut->setContext(Qt::ApplicationShortcut);
+        connect(newSubDirShortcut, &QShortcut::activated,
+                this, [this](){
+                    newSubDirectory();
+                });
+    }
 }
 
 void VDirectoryTree::setNotebook(VNotebook *p_notebook)
@@ -170,12 +120,14 @@ void VDirectoryTree::setNotebook(VNotebook *p_notebook)
 
 void VDirectoryTree::fillTreeItem(QTreeWidgetItem *p_item, VDirectory *p_directory)
 {
+    static QIcon itemIcon = VIconUtils::treeViewIcon(":/resources/icons/dir_item.svg");
+
     int col = 0;
     QString name = p_directory->getName();
     p_item->setText(col, name);
     p_item->setToolTip(col, name);
     p_item->setData(col, Qt::UserRole, QVariant::fromValue(p_directory));
-    p_item->setIcon(col, VIconUtils::treeViewIcon(":/resources/icons/dir_item.svg"));
+    p_item->setIcon(col, itemIcon);
 }
 
 void VDirectoryTree::updateDirectoryTree()
@@ -196,6 +148,8 @@ void VDirectoryTree::updateDirectoryTree()
     if (!restoreCurrentItem() && topLevelItemCount() > 0) {
         setCurrentItem(topLevelItem(0));
     }
+
+    resizeColumnToContents(0);
 }
 
 bool VDirectoryTree::restoreCurrentItem()
@@ -365,21 +319,54 @@ void VDirectoryTree::contextMenuRequested(QPoint pos)
     QMenu menu(this);
     menu.setToolTipsVisible(true);
 
+    QAction *newRootDirAct = new QAction(VIconUtils::menuIcon(":/resources/icons/create_rootdir.svg"),
+                                         tr("New &Root Folder"),
+                                         &menu);
+    newRootDirAct->setToolTip(tr("Create a root folder in current notebook"));
+    connect(newRootDirAct, &QAction::triggered,
+            this, &VDirectoryTree::newRootDirectory);
+
+    QAction *sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
+                                   tr("&Sort"),
+                                   &menu);
+    sortAct->setToolTip(tr("Sort folders in this folder/notebook manually"));
+    connect(sortAct, SIGNAL(triggered(bool)),
+            this, SLOT(sortItems()));
+
     if (!item) {
         // Context menu on the free space of the QTreeWidget
         menu.addAction(newRootDirAct);
 
         if (topLevelItemCount() > 1) {
-            menu.addAction(m_sortAct);
+            menu.addAction(sortAct);
         }
     } else {
         // Context menu on a QTreeWidgetItem
+        QAction *newNoteAct = new QAction(VIconUtils::menuIcon(":/resources/icons/create_note_tb.svg"),
+                                          tr("New &Note"),
+                                          &menu);
+        VUtils::fixTextWithShortcut(newNoteAct, "NewNote");
+        newNoteAct->setToolTip(tr("Create a note in selected folder"));
+        connect(newNoteAct, &QAction::triggered,
+                this, [this]() {
+                    g_mainWin->getFileList()->newFile();
+                });
+
+        menu.addAction(newNoteAct);
+
+        QAction *newSubDirAct = new QAction(VIconUtils::menuIcon(":/resources/icons/create_subdir.svg"),
+                                            tr("New &Subfolder"),
+                                            &menu);
+        newSubDirAct->setToolTip(tr("Create a subfolder"));
+        VUtils::fixTextWithShortcut(newSubDirAct, "NewSubfolder");
+        connect(newSubDirAct, &QAction::triggered,
+                this, &VDirectoryTree::newSubDirectory);
         if (item->parent()) {
             // Low-level item
             menu.addAction(newSubDirAct);
 
             if (item->parent()->childCount() > 1) {
-                menu.addAction(m_sortAct);
+                menu.addAction(sortAct);
             }
         } else {
             // Top-level item
@@ -387,13 +374,34 @@ void VDirectoryTree::contextMenuRequested(QPoint pos)
             menu.addAction(newSubDirAct);
 
             if (topLevelItemCount() > 1) {
-                menu.addAction(m_sortAct);
+                menu.addAction(sortAct);
             }
         }
 
         menu.addSeparator();
+
+        QAction *deleteDirAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_dir.svg"),
+                                            tr("&Delete"),
+                                            &menu);
+        deleteDirAct->setToolTip(tr("Delete selected folder"));
+        connect(deleteDirAct, &QAction::triggered,
+                this, &VDirectoryTree::deleteSelectedDirectory);
         menu.addAction(deleteDirAct);
+
+        QAction *copyAct = new QAction(VIconUtils::menuIcon(":/resources/icons/copy.svg"),
+                                       tr("&Copy\t%1").arg(VUtils::getShortcutText(c_copyShortcutSequence)),
+                                       &menu);
+        copyAct->setToolTip(tr("Copy selected folders"));
+        connect(copyAct, &QAction::triggered,
+                this, &VDirectoryTree::copySelectedDirectories);
         menu.addAction(copyAct);
+
+        QAction *cutAct = new QAction(VIconUtils::menuIcon(":/resources/icons/cut.svg"),
+                                      tr("C&ut\t%1").arg(VUtils::getShortcutText(c_cutShortcutSequence)),
+                                      &menu);
+        cutAct->setToolTip(tr("Cut selected folders"));
+        connect(cutAct, &QAction::triggered,
+                this, &VDirectoryTree::cutSelectedDirectories);
         menu.addAction(cutAct);
     }
 
@@ -402,14 +410,46 @@ void VDirectoryTree::contextMenuRequested(QPoint pos)
             menu.addSeparator();
         }
 
+        QAction *pasteAct = new QAction(VIconUtils::menuIcon(":/resources/icons/paste.svg"),
+                                        tr("&Paste\t%1").arg(VUtils::getShortcutText(c_pasteShortcutSequence)),
+                                        &menu);
+        pasteAct->setToolTip(tr("Paste folders in this folder"));
+        connect(pasteAct, &QAction::triggered,
+                this, &VDirectoryTree::pasteDirectoriesFromClipboard);
         menu.addAction(pasteAct);
     }
 
     menu.addSeparator();
-    menu.addAction(m_reloadAct);
+
+    QAction *reloadAct = new QAction(tr("&Reload From Disk"), &menu);
+    reloadAct->setToolTip(tr("Reload the content of this folder (or notebook) from disk"));
+    connect(reloadAct, &QAction::triggered,
+            this, &VDirectoryTree::reloadFromDisk);
+    menu.addAction(reloadAct);
 
     if (item) {
-        menu.addAction(m_openLocationAct);
+        QAction *openLocationAct = new QAction(VIconUtils::menuIcon(":/resources/icons/open_location.svg"),
+                                               tr("&Open Folder Location"),
+                                               &menu);
+        openLocationAct->setToolTip(tr("Explore this folder in operating system"));
+        connect(openLocationAct, &QAction::triggered,
+                this, &VDirectoryTree::openDirectoryLocation);
+        menu.addAction(openLocationAct);
+
+        QAction *pinToHistoryAct = new QAction(VIconUtils::menuIcon(":/resources/icons/pin.svg"),
+                                               tr("Pin To History"),
+                                               &menu);
+        pinToHistoryAct->setToolTip(tr("Pin selected folder to History"));
+        connect(pinToHistoryAct, &QAction::triggered,
+                this, &VDirectoryTree::pinDirectoryToHistory);
+        menu.addAction(pinToHistoryAct);
+
+        QAction *dirInfoAct = new QAction(VIconUtils::menuIcon(":/resources/icons/dir_info.svg"),
+                                          tr("&Info (Rename)\t%1").arg(VUtils::getShortcutText(c_infoShortcutSequence)),
+                                          &menu);
+        dirInfoAct->setToolTip(tr("View and edit current folder's information"));
+        connect(dirInfoAct, &QAction::triggered,
+                this, &VDirectoryTree::editDirectoryInfo);
         menu.addAction(dirInfoAct);
     }
 
@@ -610,7 +650,7 @@ void VDirectoryTree::openDirectoryLocation() const
 {
     QTreeWidgetItem *curItem = currentItem();
     V_ASSERT(curItem);
-    QUrl url = QUrl::fromLocalFile(getVDirectory(curItem)->fetchBasePath());
+    QUrl url = QUrl::fromLocalFile(getVDirectory(curItem)->fetchPath());
     QDesktopServices::openUrl(url);
 }
 
@@ -908,15 +948,11 @@ void VDirectoryTree::mousePressEvent(QMouseEvent *event)
         setCurrentItem(NULL);
     }
 
-    QTreeWidget::mousePressEvent(event);
+    VTreeWidget::mousePressEvent(event);
 }
 
 void VDirectoryTree::keyPressEvent(QKeyEvent *event)
 {
-    if (VimNavigationForWidget::injectKeyPressEventForVim(this, event)) {
-        return;
-    }
-
     int key = event->key();
     int modifiers = event->modifiers();
 
@@ -949,7 +985,7 @@ void VDirectoryTree::keyPressEvent(QKeyEvent *event)
         break;
     }
 
-    QTreeWidget::keyPressEvent(event);
+    VTreeWidget::keyPressEvent(event);
 }
 
 QTreeWidgetItem *VDirectoryTree::findVDirectory(const VDirectory *p_dir, bool *p_widget)
@@ -1145,7 +1181,7 @@ void VDirectoryTree::sortItems(VDirectory *p_dir)
     for (int i = 0; i < dirs.size(); ++i) {
         const VDirectory *dir = dirs[i];
         Q_ASSERT(dir->isOpened());
-        QString createdTime = VUtils::displayDateTime(dir->getCreatedTimeUtc().toLocalTime());
+        QString createdTime = VUtils::displayDateTime(dir->getCreatedTimeUtc().toLocalTime(), true);
         QStringList cols;
         cols << dir->getName() << createdTime;
         QTreeWidgetItem *item = new QTreeWidgetItem(tree, cols);
@@ -1179,4 +1215,22 @@ void VDirectoryTree::sortItems(VDirectory *p_dir)
 
         updateItemDirectChildren(findVDirectory(p_dir));
     }
+}
+
+VDirectory *VDirectoryTree::currentDirectory() const
+{
+    QTreeWidgetItem *item = currentItem();
+    if (item) {
+        return getVDirectory(item);
+    }
+
+    return NULL;
+}
+
+void VDirectoryTree::pinDirectoryToHistory()
+{
+    QTreeWidgetItem *curItem = currentItem();
+    V_ASSERT(curItem);
+    g_mainWin->getHistoryList()->pinFolder(getVDirectory(curItem)->fetchPath());
+    g_mainWin->showStatusMessage(tr("1 folder pinned to History"));
 }

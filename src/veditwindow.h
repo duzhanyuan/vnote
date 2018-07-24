@@ -14,6 +14,17 @@
 class QPushButton;
 class QActionGroup;
 class VEditArea;
+class QMenu;
+
+// Tab info for navigation mode.
+struct TabNavigationInfo
+{
+    // Top left of the tab relative to edit window.
+    QPoint m_topLeft;
+
+    VEditTab *m_tab;
+};
+
 
 class VEditWindow : public QTabWidget
 {
@@ -27,7 +38,9 @@ public:
     bool closeFile(const VNotebook *p_notebook, bool p_forced);
     void editFile();
     void saveFile();
-    void readFile();
+
+    void readFile(bool p_discard = false);
+
     void saveAndReadFile();
     bool closeAllFiles(bool p_forced);
 
@@ -64,6 +77,7 @@ public:
     void clearSearchedWordHighlight();
     void moveCurrentTabOneSplit(bool p_right);
     void focusNextTab(bool p_right);
+
     // Return true if the file list is shown.
     bool showOpenedFileList();
 
@@ -79,6 +93,13 @@ public:
 
     // Check whether opened files have been changed outside.
     void checkFileChangeOutside();
+
+    // Auto save file.
+    void saveAll();
+
+    int tabBarHeight() const;
+
+    QVector<TabNavigationInfo> getTabsNavigationInfo() const;
 
 protected:
     void mousePressEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
@@ -127,7 +148,8 @@ private slots:
 
     void handleTabCurrentHeaderChanged(const VHeaderPointer &p_header);
 
-    void updateSplitMenu();
+    void updateSplitMenu(QMenu *p_menu);
+
     void tabbarContextMenuRequested(QPoint p_pos);
     void handleLocateAct();
     void handleMoveLeftAct();
@@ -146,11 +168,12 @@ private slots:
     void tabRequestToClose(VEditTab *p_tab);
 
 private:
-    void initTabActions();
     void setupCornerWidget();
+
     void removeEditTab(int p_index);
+
     int insertEditTab(int p_index, VFile *p_file, QWidget *p_page);
-    int appendEditTab(VFile *p_file, QWidget *p_page);
+
     int openFileInTab(VFile *p_file, OpenFileMode p_mode);
 
     QString generateTooltip(const VFile *p_file) const;
@@ -174,6 +197,8 @@ private:
     // Connect the signals of VEditTab to this VEditWindow.
     void connectEditTab(const VEditTab *p_tab);
 
+    QAction *getRemoveSplitAction();
+
     VEditArea *m_editArea;
 
     // These two members are only used for alternateTab().
@@ -186,33 +211,9 @@ private:
     QPushButton *leftBtn;
 
     // Actions
-    QAction *splitAct;
-    QAction *removeSplitAct;
-    // Locate current note in the directory and file list
-    QAction *m_locateAct;
-    QAction *m_moveLeftAct;
-    QAction *m_moveRightAct;
-
-    // Close current tab action in tab menu.
-    QAction *m_closeTabAct;
-
-    // Close other tabs action in tab menu.
-    QAction *m_closeOthersAct;
-
-    // Close tabs to the right in tab menu.
-    QAction *m_closeRightAct;
-
-    // View and edit info about this note.
-    QAction *m_noteInfoAct;
-
-    // Open the location (the folder containing this file) of this note.
-    QAction *m_openLocationAct;
-
-    // Reload the note from disk.
-    QAction *m_reloadAct;
-
-    // Open the recycle bin folder of this note.
-    QAction *m_recycleBinAct;
+    QAction *m_removeSplitAct;
+    QAction *m_maximizeSplitAct;
+    QAction *m_distributeSplitsAct;
 };
 
 inline QString VEditWindow::generateTooltip(const VFile *p_file) const

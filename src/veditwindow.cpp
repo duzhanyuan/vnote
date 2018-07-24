@@ -1,5 +1,6 @@
 #include <QtWidgets>
 #include <QtDebug>
+
 #include "veditwindow.h"
 #include "vedittab.h"
 #include "utils/vutils.h"
@@ -12,18 +13,29 @@
 #include "vfilelist.h"
 #include "vconfigmanager.h"
 #include "utils/viconutils.h"
+#include "vcart.h"
+#include "vhistorylist.h"
+#include "vnote.h"
+#include "vexplorer.h"
 
 extern VConfigManager *g_config;
+
 extern VMainWindow *g_mainWin;
+
+extern VNote *g_vnote;
+
+#define GET_TAB_FROM_SENDER() static_cast<QAction *>(sender())->data().toInt()
 
 VEditWindow::VEditWindow(VEditArea *editArea, QWidget *parent)
     : QTabWidget(parent),
       m_editArea(editArea),
       m_curTabWidget(NULL),
-      m_lastTabWidget(NULL)
+      m_lastTabWidget(NULL),
+      m_removeSplitAct(NULL),
+      m_maximizeSplitAct(NULL),
+      m_distributeSplitsAct(NULL)
 {
     setAcceptDrops(true);
-    initTabActions();
     setupCornerWidget();
 
     // Explicit speficy in macOS.
@@ -56,148 +68,6 @@ VEditWindow::VEditWindow(VEditArea *editArea, QWidget *parent)
             this, &VEditWindow::contextMenuRequested);
 }
 
-void VEditWindow::initTabActions()
-{
-    m_locateAct = new QAction(VIconUtils::menuIcon(":/resources/icons/locate_note.svg"),
-                              tr("Locate To Folder"), this);
-    m_locateAct->setToolTip(tr("Locate the folder of current note"));
-    connect(m_locateAct, &QAction::triggered,
-            this, &VEditWindow::handleLocateAct);
-
-    m_moveLeftAct = new QAction(VIconUtils::menuIcon(":/resources/icons/move_tab_left.svg"),
-                                tr("Move One Split Left"), this);
-    m_moveLeftAct->setToolTip(tr("Move current tab to the split on the left"));
-    connect(m_moveLeftAct, &QAction::triggered,
-            this, &VEditWindow::handleMoveLeftAct);
-
-    m_moveRightAct = new QAction(VIconUtils::menuIcon(":/resources/icons/move_tab_right.svg"),
-                                 tr("Move One Split Right"), this);
-    m_moveRightAct->setToolTip(tr("Move current tab to the split on the right"));
-    connect(m_moveRightAct, &QAction::triggered,
-            this, &VEditWindow::handleMoveRightAct);
-
-    m_closeTabAct = new QAction(VIconUtils::menuIcon(":/resources/icons/close.svg"),
-                                tr("Close Tab"), this);
-    m_closeTabAct->setToolTip(tr("Close current note tab"));
-    connect(m_closeTabAct, &QAction::triggered,
-            this, [this](){
-                int tab = this->m_closeTabAct->data().toInt();
-                Q_ASSERT(tab != -1);
-                closeTab(tab);
-            });
-
-    m_closeOthersAct = new QAction(tr("Close Other Tabs"), this);
-    m_closeOthersAct->setToolTip(tr("Close all other note tabs"));
-    connect(m_closeOthersAct, &QAction::triggered,
-            this, [this](){
-                int tab = this->m_closeTabAct->data().toInt();
-                Q_ASSERT(tab != -1);
-
-                for (int i = tab - 1; i >= 0; --i) {
-                    this->setCurrentIndex(i);
-                    this->updateTabStatus(i);
-                    if (this->closeTab(i)) {
-                        --tab;
-                    }
-                }
-
-                for (int i = tab + 1; i < this->count();) {
-                    this->setCurrentIndex(i);
-                    this->updateTabStatus(i);
-                    if (!this->closeTab(i)) {
-                        ++i;
-                    }
-                }
-            });
-
-    m_closeRightAct = new QAction(tr("Close Tabs To The Right"), this);
-    m_closeRightAct->setToolTip(tr("Close all the note tabs to the right of current tab"));
-    connect(m_closeRightAct, &QAction::triggered,
-            this, [this](){
-                int tab = this->m_closeTabAct->data().toInt();
-                Q_ASSERT(tab != -1);
-
-                for (int i = tab + 1; i < this->count();) {
-                    this->setCurrentIndex(i);
-                    this->updateTabStatus(i);
-                    if (!this->closeTab(i)) {
-                        ++i;
-                    }
-                }
-            });
-
-    m_noteInfoAct = new QAction(VIconUtils::menuIcon(":/resources/icons/note_info.svg"),
-                                tr("Note Info"), this);
-    m_noteInfoAct->setToolTip(tr("View and edit information of the note"));
-    connect(m_noteInfoAct, &QAction::triggered,
-            this, [this](){
-                int tab = this->m_closeTabAct->data().toInt();
-                Q_ASSERT(tab != -1);
-
-                VEditTab *editor = getTab(tab);
-                QPointer<VFile> file = editor->getFile();
-                Q_ASSERT(file);
-                if (file->getType() == FileType::Note) {
-                    VNoteFile *tmpFile = dynamic_cast<VNoteFile *>((VFile *)file);
-                    g_mainWin->getFileList()->fileInfo(tmpFile);
-                } else if (file->getType() == FileType::Orphan) {
-                    g_mainWin->editOrphanFileInfo(file);
-                }
-            });
-
-    m_openLocationAct = new QAction(tr("Open Note Location"), this);
-    m_openLocationAct->setToolTip(tr("Open the folder containing this note in operating system"));
-    connect(m_openLocationAct, &QAction::triggered,
-            this, [this](){
-                int tab = this->m_closeTabAct->data().toInt();
-                Q_ASSERT(tab != -1);
-
-                VEditTab *editor = getTab(tab);
-                QPointer<VFile> file = editor->getFile();
-                Q_ASSERT(file);
-                QUrl url = QUrl::fromLocalFile(file->fetchBasePath());
-                QDesktopServices::openUrl(url);
-            });
-
-    m_reloadAct = new QAction(tr("Reload From Disk"), this);
-    m_reloadAct->setToolTip(tr("Reload the content of this note from disk"));
-    connect(m_reloadAct, &QAction::triggered,
-            this, [this](){
-                int tab = this->m_closeTabAct->data().toInt();
-                Q_ASSERT(tab != -1);
-
-                VEditTab *editor = getTab(tab);
-                editor->reloadFromDisk();
-            });
-
-    m_recycleBinAct = new QAction(VIconUtils::menuIcon(":/resources/icons/recycle_bin.svg"),
-                                  tr("&Recycle Bin"), this);
-    m_recycleBinAct->setToolTip(tr("Open the recycle bin of this note"));
-    connect(m_recycleBinAct, &QAction::triggered,
-            this, [this]() {
-                int tab = this->m_closeTabAct->data().toInt();
-                Q_ASSERT(tab != -1);
-
-                VEditTab *editor = getTab(tab);
-                VFile *file = editor->getFile();
-                Q_ASSERT(file);
-
-                QString folderPath;
-                if (file->getType() == FileType::Note) {
-                    const VNoteFile *tmpFile = dynamic_cast<const VNoteFile *>((VFile *)file);
-                    folderPath = tmpFile->getNotebook()->getRecycleBinFolderPath();
-                } else if (file->getType() == FileType::Orphan) {
-                    const VOrphanFile *tmpFile = dynamic_cast<const VOrphanFile *>((VFile *)file);
-                    folderPath = tmpFile->fetchRecycleBinFolderPath();
-                } else {
-                    Q_ASSERT(false);
-                }
-
-                QUrl url = QUrl::fromLocalFile(folderPath);
-                QDesktopServices::openUrl(url);
-            });
-}
-
 void VEditWindow::setupCornerWidget()
 {
     // Left button
@@ -205,6 +75,11 @@ void VEditWindow::setupCornerWidget()
                               "", this);
     leftBtn->setProperty("CornerBtn", true);
     leftBtn->setToolTip(tr("Opened Notes List"));
+    QString keyText = VUtils::getCaptainShortcutSequenceText("OpenedFileList");
+    if (!keyText.isEmpty()) {
+        leftBtn->setToolTip(QString("%1\t%2").arg(leftBtn->toolTip()).arg(keyText));
+    }
+
     VOpenedListMenu *leftMenu = new VOpenedListMenu(this);
     leftMenu->setToolTipsVisible(true);
     connect(leftMenu, &VOpenedListMenu::fileTriggered,
@@ -212,32 +87,17 @@ void VEditWindow::setupCornerWidget()
     leftBtn->setMenu(leftMenu);
 
     // Right button
-    // Actions
-    splitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/split_window.svg"),
-                           tr("Split"), this);
-    splitAct->setToolTip(tr("Split current window vertically"));
-    connect(splitAct, &QAction::triggered,
-            this, [this](){
-                splitWindow(true);
-            });
-
-    removeSplitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/remove_split.svg"),
-                                 tr("Remove split"), this);
-    removeSplitAct->setToolTip(tr("Remove current split window"));
-    connect(removeSplitAct, &QAction::triggered,
-            this, &VEditWindow::removeSplit);
-
     rightBtn = new QPushButton(VIconUtils::editWindowCornerIcon(":/resources/icons/corner_menu.svg"),
                                "", this);
     rightBtn->setProperty("CornerBtn", true);
     rightBtn->setToolTip(tr("Menu"));
     QMenu *rightMenu = new QMenu(this);
     rightMenu->setToolTipsVisible(true);
-    rightMenu->addAction(splitAct);
-    rightMenu->addAction(removeSplitAct);
     rightBtn->setMenu(rightMenu);
     connect(rightMenu, &QMenu::aboutToShow,
-            this, &VEditWindow::updateSplitMenu);
+            this, [this, rightMenu]() {
+                updateSplitMenu(rightMenu);
+            });
 
     // Move all buttons to the right corner.
     QWidget *widget = new QWidget(this);
@@ -269,7 +129,9 @@ void VEditWindow::removeEditTab(int p_index)
     Q_ASSERT(p_index > -1 && p_index < tabBar()->count());
 
     VEditTab *editor = getTab(p_index);
+
     removeTab(p_index);
+
     delete editor;
 }
 
@@ -282,11 +144,6 @@ int VEditWindow::insertEditTab(int p_index, VFile *p_file, QWidget *p_page)
     return idx;
 }
 
-int VEditWindow::appendEditTab(VFile *p_file, QWidget *p_page)
-{
-    return insertEditTab(count(), p_file, p_page);
-}
-
 int VEditWindow::openFile(VFile *p_file, OpenFileMode p_mode)
 {
     qDebug() << "open" << p_file->getName();
@@ -295,6 +152,7 @@ int VEditWindow::openFile(VFile *p_file, OpenFileMode p_mode)
     if (idx > -1) {
         goto out;
     }
+
     idx = openFileInTab(p_file, p_mode);
 
 out:
@@ -428,8 +286,9 @@ int VEditWindow::openFileInTab(VFile *p_file, OpenFileMode p_mode)
     // Connect the signals.
     connectEditTab(editor);
 
-    int idx = appendEditTab(p_file, editor);
-    return idx;
+    // Insert right after current tab.
+    // VFileList will depends on this behavior.
+    return insertEditTab(currentIndex() + 1, p_file, editor);
 }
 
 int VEditWindow::findTabByFile(const VFile *p_file) const
@@ -466,11 +325,11 @@ bool VEditWindow::closeTab(int p_index)
     return ok;
 }
 
-void VEditWindow::readFile()
+void VEditWindow::readFile(bool p_discard)
 {
     VEditTab *editor = getTab(currentIndex());
     Q_ASSERT(editor);
-    editor->readFile();
+    editor->readFile(p_discard);
 }
 
 void VEditWindow::saveAndReadFile()
@@ -607,90 +466,312 @@ void VEditWindow::mousePressEvent(QMouseEvent *event)
     QTabWidget::mousePressEvent(event);
 }
 
+QAction *VEditWindow::getRemoveSplitAction()
+{
+    if (!m_removeSplitAct) {
+        m_removeSplitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/remove_split.svg"),
+                                       tr("Remove Split"),
+                                       this);
+        m_removeSplitAct->setToolTip(tr("Remove current split window"));
+        VUtils::fixTextWithCaptainShortcut(m_removeSplitAct, "RemoveSplit");
+        connect(m_removeSplitAct, &QAction::triggered,
+                this, &VEditWindow::removeSplit);
+    }
+
+    return m_removeSplitAct;
+}
+
 void VEditWindow::contextMenuRequested(QPoint pos)
 {
     QMenu menu(this);
     menu.setToolTipsVisible(true);
 
     if (canRemoveSplit()) {
-        menu.addAction(removeSplitAct);
+        menu.addAction(getRemoveSplitAction());
         menu.exec(this->mapToGlobal(pos));
     }
 }
 
 void VEditWindow::tabbarContextMenuRequested(QPoint p_pos)
 {
-    QMenu menu(this);
-    menu.setToolTipsVisible(true);
-
     QTabBar *bar = tabBar();
     int tab = bar->tabAt(p_pos);
     if (tab == -1) {
         return;
     }
 
+    QMenu menu(this);
+    menu.setToolTipsVisible(true);
+
+    QAction *recycleBinAct = new QAction(VIconUtils::menuIcon(":/resources/icons/recycle_bin.svg"),
+                                         tr("&Recycle Bin"),
+                                         &menu);
+    recycleBinAct->setToolTip(tr("Open the recycle bin of this note"));
+    connect(recycleBinAct, &QAction::triggered,
+            this, [this]() {
+                int tab = GET_TAB_FROM_SENDER();
+                Q_ASSERT(tab != -1);
+
+                VEditTab *editor = getTab(tab);
+                VFile *file = editor->getFile();
+                Q_ASSERT(file);
+
+                QString folderPath;
+                if (file->getType() == FileType::Note) {
+                    const VNoteFile *tmpFile = dynamic_cast<const VNoteFile *>((VFile *)file);
+                    folderPath = tmpFile->getNotebook()->getRecycleBinFolderPath();
+                } else if (file->getType() == FileType::Orphan) {
+                    const VOrphanFile *tmpFile = dynamic_cast<const VOrphanFile *>((VFile *)file);
+                    folderPath = tmpFile->fetchRecycleBinFolderPath();
+                } else {
+                    Q_ASSERT(false);
+                }
+
+                QUrl url = QUrl::fromLocalFile(folderPath);
+                QDesktopServices::openUrl(url);
+            });
+
+    QAction *openLocationAct = new QAction(VIconUtils::menuIcon(":/resources/icons/open_location.svg"),
+                                           tr("Open Note Location"),
+                                           &menu);
+    openLocationAct->setToolTip(tr("Explore the folder containing this note in operating system"));
+    connect(openLocationAct, &QAction::triggered,
+            this, [this](){
+                int tab = GET_TAB_FROM_SENDER();
+                Q_ASSERT(tab != -1);
+
+                VEditTab *editor = getTab(tab);
+                QPointer<VFile> file = editor->getFile();
+                Q_ASSERT(file);
+                QUrl url = QUrl::fromLocalFile(file->fetchBasePath());
+                QDesktopServices::openUrl(url);
+            });
+
+    QAction *reloadAct = new QAction(tr("Reload From Disk"), &menu);
+    reloadAct->setToolTip(tr("Reload the content of this note from disk"));
+    connect(reloadAct, &QAction::triggered,
+            this, [this](){
+                int tab = GET_TAB_FROM_SENDER();
+                Q_ASSERT(tab != -1);
+
+                VEditTab *editor = getTab(tab);
+                editor->reloadFromDisk();
+            });
+
+    QAction *addToCartAct = new QAction(VIconUtils::menuIcon(":/resources/icons/cart.svg"),
+                                        tr("Add To Cart"),
+                                        &menu);
+    addToCartAct->setToolTip(tr("Add this note to Cart for further processing"));
+    connect(addToCartAct, &QAction::triggered,
+            this, [this](){
+                int tab = GET_TAB_FROM_SENDER();
+                Q_ASSERT(tab != -1);
+
+                VEditTab *editor = getTab(tab);
+                QPointer<VFile> file = editor->getFile();
+                Q_ASSERT(file);
+                g_mainWin->getCart()->addFile(file->fetchPath());
+                g_mainWin->showStatusMessage(tr("1 note added to Cart"));
+            });
+
+    QAction *pinToHistoryAct = new QAction(VIconUtils::menuIcon(":/resources/icons/pin.svg"),
+                                           tr("Pin To History"),
+                                           &menu);
+    pinToHistoryAct->setToolTip(tr("Pin this note to History"));
+    connect(pinToHistoryAct, &QAction::triggered,
+            this, [this](){
+                int tab = GET_TAB_FROM_SENDER();
+                Q_ASSERT(tab != -1);
+
+                VEditTab *editor = getTab(tab);
+                QPointer<VFile> file = editor->getFile();
+                Q_ASSERT(file);
+                QStringList files;
+                files << file->fetchPath();
+                g_mainWin->getHistoryList()->pinFiles(files);
+                g_mainWin->showStatusMessage(tr("1 note pinned to History"));
+            });
+
+    QAction *noteInfoAct = new QAction(VIconUtils::menuIcon(":/resources/icons/note_info.svg"),
+                                       tr("Note Info"),
+                                       &menu);
+    noteInfoAct->setToolTip(tr("View and edit information of the note"));
+    connect(noteInfoAct, &QAction::triggered,
+            this, [this](){
+                int tab = GET_TAB_FROM_SENDER();
+                Q_ASSERT(tab != -1);
+
+                VEditTab *editor = getTab(tab);
+                QPointer<VFile> file = editor->getFile();
+                Q_ASSERT(file);
+                if (file->getType() == FileType::Note) {
+                    VNoteFile *tmpFile = dynamic_cast<VNoteFile *>((VFile *)file);
+                    g_mainWin->getFileList()->fileInfo(tmpFile);
+                } else if (file->getType() == FileType::Orphan) {
+                    g_mainWin->editOrphanFileInfo(file);
+                }
+            });
+
     VEditTab *editor = getTab(tab);
     VFile *file = editor->getFile();
     if (file->getType() == FileType::Note) {
         // Locate to folder.
-        m_locateAct->setData(tab);
-        menu.addAction(m_locateAct);
+        QAction *locateAct = new QAction(VIconUtils::menuIcon(":/resources/icons/locate_note.svg"),
+                                         tr("Locate To Folder"),
+                                         &menu);
+        locateAct->setToolTip(tr("Locate the folder of current note"));
+        VUtils::fixTextWithCaptainShortcut(locateAct, "LocateCurrentFile");
+        connect(locateAct, &QAction::triggered,
+                this, &VEditWindow::handleLocateAct);
+        locateAct->setData(tab);
+        menu.addAction(locateAct);
 
         menu.addSeparator();
 
-        m_recycleBinAct->setData(tab);
-        menu.addAction(m_recycleBinAct);
+        recycleBinAct->setData(tab);
+        menu.addAction(recycleBinAct);
 
-        m_openLocationAct->setData(tab);
-        menu.addAction(m_openLocationAct);
+        openLocationAct->setData(tab);
+        menu.addAction(openLocationAct);
 
-        m_reloadAct->setData(tab);
-        menu.addAction(m_reloadAct);
+        reloadAct->setData(tab);
+        menu.addAction(reloadAct);
 
-        m_noteInfoAct->setData(tab);
-        menu.addAction(m_noteInfoAct);
+        addToCartAct->setData(tab);
+        menu.addAction(addToCartAct);
+
+        pinToHistoryAct->setData(tab);
+        menu.addAction(pinToHistoryAct);
+
+        noteInfoAct->setData(tab);
+        menu.addAction(noteInfoAct);
     } else if (file->getType() == FileType::Orphan
                && !(dynamic_cast<VOrphanFile *>(file)->isSystemFile())) {
-        m_recycleBinAct->setData(tab);
-        menu.addAction(m_recycleBinAct);
+        recycleBinAct->setData(tab);
+        menu.addAction(recycleBinAct);
 
-        m_openLocationAct->setData(tab);
-        menu.addAction(m_openLocationAct);
+        openLocationAct->setData(tab);
+        menu.addAction(openLocationAct);
 
-        m_reloadAct->setData(tab);
-        menu.addAction(m_reloadAct);
+        reloadAct->setData(tab);
+        menu.addAction(reloadAct);
 
-        m_noteInfoAct->setData(tab);
-        menu.addAction(m_noteInfoAct);
+        addToCartAct->setData(tab);
+        menu.addAction(addToCartAct);
+
+        pinToHistoryAct->setData(tab);
+        menu.addAction(pinToHistoryAct);
+
+        noteInfoAct->setData(tab);
+        menu.addAction(noteInfoAct);
     }
-
 
     int totalWin = m_editArea->windowCount();
     // When there is only one tab and one split window, there is no need to
     // display these two actions.
     if (totalWin > 1 || count() > 1) {
         menu.addSeparator();
-        m_moveLeftAct->setData(tab);
-        // Move one split left.
-        menu.addAction(m_moveLeftAct);
 
-        m_moveRightAct->setData(tab);
-        // Move one split right.
-        menu.addAction(m_moveRightAct);
+        QAction *moveLeftAct = new QAction(VIconUtils::menuIcon(":/resources/icons/move_tab_left.svg"),
+                                           tr("Move One Split Left"),
+                                           &menu);
+        moveLeftAct->setToolTip(tr("Move current tab to the split on the left"));
+        VUtils::fixTextWithCaptainShortcut(moveLeftAct, "MoveTabSplitLeft");
+        connect(moveLeftAct, &QAction::triggered,
+                this, &VEditWindow::handleMoveLeftAct);
+        moveLeftAct->setData(tab);
+        menu.addAction(moveLeftAct);
+
+        QAction *moveRightAct = new QAction(VIconUtils::menuIcon(":/resources/icons/move_tab_right.svg"),
+                                            tr("Move One Split Right"),
+                                            &menu);
+        moveRightAct->setToolTip(tr("Move current tab to the split on the right"));
+        VUtils::fixTextWithCaptainShortcut(moveRightAct, "MoveTabSplitRight");
+        connect(moveRightAct, &QAction::triggered,
+                this, &VEditWindow::handleMoveRightAct);
+        moveRightAct->setData(tab);
+        menu.addAction(moveRightAct);
     }
+
+    menu.addSeparator();
 
     // Close tab, or other tabs, or tabs to the right.
-    menu.addSeparator();
-    m_closeTabAct->setData(tab);
-    menu.addAction(m_closeTabAct);
+    QAction *closeTabAct = new QAction(VIconUtils::menuIcon(":/resources/icons/close.svg"),
+                                       tr("Close Tab"),
+                                       &menu);
+    closeTabAct->setToolTip(tr("Close current note tab"));
+    if (!VUtils::fixTextWithShortcut(closeTabAct, "CloseNote")) {
+        VUtils::fixTextWithCaptainShortcut(closeTabAct, "CloseNote");
+    }
+
+    connect(closeTabAct, &QAction::triggered,
+            this, [this](){
+                int tab = GET_TAB_FROM_SENDER();
+                Q_ASSERT(tab != -1);
+                closeTab(tab);
+            });
+    closeTabAct->setData(tab);
+    menu.addAction(closeTabAct);
+
     if (count() > 1) {
-        m_closeOthersAct->setData(tab);
-        menu.addAction(m_closeOthersAct);
+        QAction *closeOthersAct = new QAction(tr("Close Other Tabs"), &menu);
+        closeOthersAct->setToolTip(tr("Close all other note tabs"));
+        connect(closeOthersAct, &QAction::triggered,
+                this, [this](){
+                    int tab = GET_TAB_FROM_SENDER();
+                    Q_ASSERT(tab != -1);
+                    for (int i = tab - 1; i >= 0; --i) {
+                        this->setCurrentIndex(i);
+                        this->updateTabStatus(i);
+                        if (this->closeTab(i)) {
+                            --tab;
+                        }
+                    }
+
+                    for (int i = tab + 1; i < this->count();) {
+                        this->setCurrentIndex(i);
+                        this->updateTabStatus(i);
+                        if (!this->closeTab(i)) {
+                            ++i;
+                        }
+                    }
+                });
+        closeOthersAct->setData(tab);
+        menu.addAction(closeOthersAct);
+
         if (tab < count() - 1) {
-            m_closeRightAct->setData(tab);
-            menu.addAction(m_closeRightAct);
+            QAction *closeRightAct = new QAction(tr("Close Tabs To The Right"), &menu);
+            closeRightAct->setToolTip(tr("Close all the note tabs to the right of current tab"));
+            connect(closeRightAct, &QAction::triggered,
+                    this, [this](){
+                        int tab = GET_TAB_FROM_SENDER();
+                        Q_ASSERT(tab != -1);
+                        for (int i = tab + 1; i < this->count();) {
+                            this->setCurrentIndex(i);
+                            this->updateTabStatus(i);
+                            if (!this->closeTab(i)) {
+                                ++i;
+                            }
+                        }
+                    });
+            closeRightAct->setData(tab);
+            menu.addAction(closeRightAct);
         }
     }
+
+    QAction *closeAllAct = new QAction(tr("Close All Tabs"), &menu);
+    closeAllAct->setToolTip(tr("Close all the note tabs"));
+    connect(closeAllAct, &QAction::triggered,
+            this, [this](){
+                for (int i = 0; i < this->count();) {
+                    this->setCurrentIndex(i);
+                    this->updateTabStatus(i);
+                    if (!this->closeTab(i)) {
+                        ++i;
+                    }
+                }
+            });
+    menu.addAction(closeAllAct);
 
     if (!menu.actions().isEmpty()) {
         menu.exec(bar->mapToGlobal(p_pos));
@@ -710,13 +791,51 @@ void VEditWindow::tabListJump(VFile *p_file)
     updateTabStatus(idx);
 }
 
-void VEditWindow::updateSplitMenu()
+void VEditWindow::updateSplitMenu(QMenu *p_menu)
 {
-    if (canRemoveSplit()) {
-        removeSplitAct->setVisible(true);
-    } else {
-        removeSplitAct->setVisible(false);
+    if (p_menu->isEmpty()) {
+        QAction *splitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/split_window.svg"),
+                                        tr("Split"),
+                                        p_menu);
+        splitAct->setToolTip(tr("Split current window vertically"));
+        VUtils::fixTextWithCaptainShortcut(splitAct, "VerticalSplit");
+        connect(splitAct, &QAction::triggered,
+                this, [this](){
+                    splitWindow(true);
+                });
+        p_menu->addAction(splitAct);
+
+        Q_ASSERT(!m_maximizeSplitAct);
+        m_maximizeSplitAct = new QAction(tr("Maximize Split"), p_menu);
+        m_maximizeSplitAct->setToolTip(tr("Maximize current split window"));
+        VUtils::fixTextWithCaptainShortcut(m_maximizeSplitAct, "MaximizeSplit");
+        connect(m_maximizeSplitAct, &QAction::triggered,
+                this, [this]() {
+                    focusWindow();
+                    m_editArea->maximizeCurrentSplit();
+                });
+        p_menu->addAction(m_maximizeSplitAct);
+
+        Q_ASSERT(!m_distributeSplitsAct);
+        m_distributeSplitsAct = new QAction(tr("Distribute Splits"), p_menu);
+        m_distributeSplitsAct->setToolTip(tr("Distribute all the split windows evenly"));
+        VUtils::fixTextWithCaptainShortcut(m_distributeSplitsAct, "DistributeSplits");
+        connect(m_distributeSplitsAct, &QAction::triggered,
+                m_editArea, &VEditArea::distributeSplits);
+        p_menu->addAction(m_distributeSplitsAct);
+
+        p_menu->addAction(getRemoveSplitAction());
     }
+
+    if (m_editArea->windowCount() > 1) {
+        m_maximizeSplitAct->setVisible(true);
+        m_distributeSplitsAct->setVisible(true);
+    } else {
+        m_maximizeSplitAct->setVisible(false);
+        m_distributeSplitsAct->setVisible(false);
+    }
+
+    getRemoveSplitAction()->setVisible(canRemoveSplit());
 }
 
 bool VEditWindow::canRemoveSplit()
@@ -865,7 +984,7 @@ QVector<VEditTabInfo> VEditWindow::getAllTabsInfo() const
 
 void VEditWindow::handleLocateAct()
 {
-    int tab = m_locateAct->data().toInt();
+    int tab = GET_TAB_FROM_SENDER();
     VEditTab *editor = getTab(tab);
     QPointer<VFile> file = editor->getFile();
     if (file->getType() == FileType::Note) {
@@ -875,14 +994,14 @@ void VEditWindow::handleLocateAct()
 
 void VEditWindow::handleMoveLeftAct()
 {
-    int tab = m_moveLeftAct->data().toInt();
+    int tab = GET_TAB_FROM_SENDER();
     Q_ASSERT(tab != -1);
     moveTabOneSplit(tab, false);
 }
 
 void VEditWindow::handleMoveRightAct()
 {
-    int tab = m_moveRightAct->data().toInt();
+    int tab = GET_TAB_FROM_SENDER();
     Q_ASSERT(tab != -1);
     moveTabOneSplit(tab, true);
 }
@@ -950,7 +1069,7 @@ bool VEditWindow::addEditTab(QWidget *p_widget)
     // Connect the signals.
     connectEditTab(editor);
 
-    int idx = appendEditTab(editor->getFile(), editor);
+    int idx = insertEditTab(currentIndex() + 1, editor->getFile(), editor);
     setCurrentIndex(idx);
     updateTabStatus(idx);
     return true;
@@ -959,7 +1078,10 @@ bool VEditWindow::addEditTab(QWidget *p_widget)
 void VEditWindow::connectEditTab(const VEditTab *p_tab)
 {
     connect(p_tab, &VEditTab::getFocused,
-            this, &VEditWindow::getFocused);
+            this, [this]() {
+                setCurrentWidget(static_cast<VEditTab *>(sender()));
+                emit getFocused();
+            });
     connect(p_tab, &VEditTab::outlineChanged,
             this, &VEditWindow::handleTabOutlineChanged);
     connect(p_tab, &VEditTab::currentHeaderChanged,
@@ -1072,24 +1194,41 @@ void VEditWindow::dropEvent(QDropEvent *p_event)
 {
     const QMimeData *mime = p_event->mimeData();
     if (mime->hasFormat("text/uri-list") && mime->hasUrls()) {
-        // Open external files in this edit window.
+        // Open external files in this edit window or open a direcotry in Explorer.
+        bool isDir = false;
         QStringList files;
         QList<QUrl> urls = mime->urls();
         for (int i = 0; i < urls.size(); ++i) {
-            QString file;
             if (urls[i].isLocalFile()) {
-                file = urls[i].toLocalFile();
-                QFileInfo fi(file);
-                if (fi.exists() && fi.isFile()) {
-                    file = QDir::cleanPath(fi.absoluteFilePath());
+                QFileInfo fi(urls[i].toLocalFile());
+                if (!fi.exists()) {
+                    continue;
+                }
+
+                QString file = QDir::cleanPath(fi.absoluteFilePath());
+                if (fi.isFile()) {
+                    files.append(file);
+                } else if (urls.size() == 1) {
+                    isDir = true;
                     files.append(file);
                 }
             }
         }
 
         if (!files.isEmpty()) {
-            focusWindow();
-            g_mainWin->openFiles(files);
+            if (isDir) {
+                VDirectory *dir = g_vnote->getInternalDirectory(files[0]);
+                if (dir) {
+                    g_mainWin->locateDirectory(dir);
+                } else {
+                    // External directory.
+                    g_mainWin->showExplorerPanel(true);
+                    g_mainWin->getExplorer()->setRootDirectory(files[0]);
+                }
+            } else {
+                focusWindow();
+                g_mainWin->openFiles(files);
+            }
         }
 
         p_event->acceptProposedAction();
@@ -1120,6 +1259,14 @@ void VEditWindow::checkFileChangeOutside()
     }
 }
 
+void VEditWindow::saveAll()
+{
+    int nrTab = count();
+    for (int i = 0; i < nrTab; ++i) {
+        getTab(i)->saveFile();
+    }
+}
+
 void VEditWindow::tabRequestToClose(VEditTab *p_tab)
 {
     bool ok = p_tab->closeFile(false);
@@ -1131,4 +1278,28 @@ void VEditWindow::tabRequestToClose(VEditTab *p_tab)
 
         p_tab->deleteLater();
     }
+}
+
+int VEditWindow::tabBarHeight() const
+{
+    return tabBar()->height();
+}
+
+QVector<TabNavigationInfo> VEditWindow::getTabsNavigationInfo() const
+{
+    QVector<TabNavigationInfo> infos;
+    QTabBar *bar = tabBar();
+    for (int i = 0; i < bar->count(); ++i) {
+        QPoint tl = bar->tabRect(i).topLeft();
+        if (tl.x() < 0 || tl.x() >= bar->width()) {
+            continue;
+        }
+
+        TabNavigationInfo info;
+        info.m_topLeft = bar->mapToParent(tl);
+        info.m_tab = getTab(i);
+        infos.append(info);
+    }
+
+    return infos;
 }

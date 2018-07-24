@@ -7,26 +7,21 @@
 #include <QVector>
 #include <QSettings>
 #include <QHash>
+#include <QLinkedList>
+#include <QDir>
+
 #include "vnotebook.h"
-#include "hgmarkdownhighlighter.h"
+#include "markdownhighlighterdata.h"
 #include "vmarkdownconverter.h"
 #include "vconstants.h"
 #include "vfilesessioninfo.h"
 #include "utils/vmetawordmanager.h"
-
+#include "markdownitoption.h"
+#include "vhistoryentry.h"
+#include "vexplorerentry.h"
 
 class QJsonObject;
 class QString;
-
-
-enum MarkdownConverterType
-{
-    Hoedown = 0,
-    Marked,
-    MarkdownIt,
-    Showdown
-};
-
 
 struct VColor
 {
@@ -45,18 +40,6 @@ struct VExternalEditor
 };
 
 
-struct MarkdownitOption
-{
-    MarkdownitOption(bool p_html, bool p_breaks, bool p_linkify)
-        : m_html(p_html), m_breaks(p_breaks), m_linkify(p_linkify)
-    {
-    }
-
-    bool m_html;
-    bool m_breaks;
-    bool m_linkify;
-};
-
 // Type of heading sequence.
 enum class HeadingSequenceType
 {
@@ -68,6 +51,7 @@ enum class HeadingSequenceType
 
     Invalid
 };
+
 
 class VConfigManager : public QObject
 {
@@ -89,6 +73,11 @@ public:
     // Get the path of the folder used to store default notebook.
     static QString getVnoteNotebookFolderPath();
 
+    // Get the path of the default export folder.
+    static QString getExportFolderPath();
+
+    static QString getDocumentPathOrHomePath();
+
     // Constants
     static const QString orgName;
     static const QString appName;
@@ -103,9 +92,12 @@ public:
     // Reset the configuratio files.
     void resetConfigurations();
 
-    QFont getMdEditFont() const;
+    // Reset the layout.
+    void resetLayoutConfigurations();
 
-    QPalette getMdEditPalette() const;
+    const QFont &getMdEditFont() const;
+
+    const QPalette &getMdEditPalette() const;
 
     QVector<HighlightingStyle> getMdHighlightingStyles() const;
 
@@ -118,7 +110,13 @@ public:
     // Get the css style URL for web view.
     QString getCssStyleUrl() const;
 
+    QString getCssStyleUrl(const QString &p_style) const;
+
     QString getCodeBlockCssStyleUrl() const;
+
+    QString getCodeBlockCssStyleUrl(const QString &p_style) const;
+
+    QString getMermaidCssStyleUrl() const;
 
     const QString &getEditorStyle() const;
     void setEditorStyle(const QString &p_style);
@@ -134,6 +132,9 @@ public:
 
     int getCurNotebookIndex() const;
     void setCurNotebookIndex(int index);
+
+    int getNaviBoxCurrentIndex() const;
+    void setNaviBoxCurrentIndex(int p_index);
 
     // Read [notebooks] section from settings into @p_notebooks.
     void getNotebooks(QVector<VNotebook *> &p_notebooks, QObject *p_parent);
@@ -173,20 +174,29 @@ public:
     const QString &getCurRenderBackgroundColor() const;
     void setCurRenderBackgroundColor(const QString &colorName);
 
+    // Return the color string of background @p_bgName.
+    QString getRenderBackgroundColor(const QString &p_bgName) const;
+
     bool getToolsDockChecked() const;
     void setToolsDockChecked(bool p_checked);
 
-    const QByteArray &getMainWindowGeometry() const;
+    bool getSearchDockChecked() const;
+    void setSearchDockChecked(bool p_checked);
+
+    const QByteArray getMainWindowGeometry() const;
     void setMainWindowGeometry(const QByteArray &p_geometry);
 
-    const QByteArray &getMainWindowState() const;
+    const QByteArray getMainWindowState() const;
     void setMainWindowState(const QByteArray &p_state);
 
-    const QByteArray &getMainSplitterState() const;
+    const QByteArray getMainSplitterState() const;
     void setMainSplitterState(const QByteArray &p_state);
 
-    const QByteArray &getNaviSplitterState() const;
-    void setNaviSplitterState(const QByteArray &p_state);
+    const QByteArray getNotebookSplitterState() const;
+    void setNotebookSplitterState(const QByteArray &p_state);
+
+    const QByteArray getTagExplorerSplitterState() const;
+    void setTagExplorerSplitterState(const QByteArray &p_state);
 
     bool getFindCaseSensitive() const;
     void setFindCaseSensitive(bool p_enabled);
@@ -212,9 +222,18 @@ public:
     bool getEnableMathjax() const;
     void setEnableMathjax(bool p_enabled);
 
+    bool getEnableGraphviz() const;
+    void setEnableGraphviz(bool p_enabled);
+
+    int getPlantUMLMode() const;
+    void setPlantUMLMode(int p_mode);
+
     qreal getWebZoomFactor() const;
     void setWebZoomFactor(qreal p_factor);
     bool isCustomWebZoomFactor();
+
+    int getEditorZoomDelta() const;
+    void setEditorZoomDelta(int p_delta);
 
     const QString &getEditorCurrentLineBg() const;
 
@@ -312,12 +331,15 @@ public:
 
     const QString &getEditorPreviewImageLineFg() const;
 
+    const QString &getEditorPreviewImageBg() const;
+
     bool getEnableCodeBlockLineNumber() const;
     void setEnableCodeBlockLineNumber(bool p_enabled);
 
     int getToolBarIconSize() const;
+    void setToolBarIconSize(int p_size);
 
-    MarkdownitOption getMarkdownitOption() const;
+    const MarkdownitOption &getMarkdownitOption() const;
     void setMarkdownitOption(const MarkdownitOption &p_opt);
 
     const QString &getRecycleBinFolder() const;
@@ -331,11 +353,9 @@ public:
     void setConfirmReloadFolder(bool p_enabled);
 
     const QString &getMathjaxJavascript() const;
+    void setMathjaxJavascript(const QString &p_js);
 
     bool getDoubleClickCloseTab() const;
-
-    bool getEnableCompactMode() const;
-    void setEnableCompactMode(bool p_enabled);
 
     StartupPageType getStartupPageType() const;
     void setStartupPageType(StartupPageType p_type);
@@ -348,6 +368,23 @@ public:
 
     // Write last opened files to [last_opened_files] of session.ini.
     void setLastOpenedFiles(const QVector<VFileSessionInfo> &p_files);
+
+    // Read history from [history] of session.ini.
+    void getHistory(QLinkedList<VHistoryEntry> &p_history) const;
+
+    void setHistory(const QLinkedList<VHistoryEntry> &p_history);
+
+    int getHistorySize() const;
+
+    // Read explorer's starred entries from [explorer_starred] of session.ini.
+    void getExplorerEntries(QVector<VExplorerEntry> &p_entries) const;
+
+    // Output starred entries to [explorer_starred] of session.ini.
+    void setExplorerEntries(const QVector<VExplorerEntry> &p_entries);
+
+    int getExplorerCurrentIndex() const;
+
+    void setExplorerCurrentIndex(int p_idx);
 
     // Read custom magic words from [magic_words] section.
     QVector<VMagicWord> getCustomMagicWords();
@@ -406,6 +443,7 @@ public:
 
     // Whether backup file is enabled.
     bool getEnableBackupFile() const;
+    void setEnableBackupFile(bool p_enabled);
 
     // Get defined external editors.
     QVector<VExternalEditor> getExternalEditors() const;
@@ -426,11 +464,63 @@ public:
 
     bool getCloseBeforeExternalEditor() const;
 
-    bool getFixImageSrcInWebWhenCopied() const;
-
-    const QStringList &getStylesToRemoveWhenCopied() const;
+    QStringList getStylesToRemoveWhenCopied() const;
 
     const QString &getStylesToInlineWhenCopied() const;
+
+    QString getStyleOfSpanForMark() const;
+
+    // Return [web]/copy_targets.
+    QStringList getCopyTargets() const;
+
+    bool getMenuBarChecked() const;
+    void setMenuBarChecked(bool p_checked);
+
+    bool getToolBarChecked() const;
+    void setToolBarChecked(bool p_checked);
+
+    bool getSingleClickClosePreviousTab() const;
+    void setSingleClickClosePreviousTab(bool p_enabled);
+
+    bool getEnableWildCardInSimpleSearch() const;
+
+    bool getEnableAutoSave() const;
+    void setEnableAutoSave(bool p_enabled);
+
+    QString getWkhtmltopdfPath() const;
+    void setWkhtmltopdfPath(const QString &p_path);
+
+    QString getWkhtmltopdfArgs() const;
+    void setWkhtmltopdfArgs(const QString &p_args);
+
+    bool getEnableFlashAnchor() const;
+    void setEnableFlashAnchor(bool p_enabled);
+
+    QStringList getCustomExport() const;
+    void setCustomExport(const QStringList &p_exp);
+
+    QStringList getSearchOptions() const;
+    void setSearchOptions(const QStringList &p_opts);
+
+    const QString &getPlantUMLServer() const;
+    void setPlantUMLServer(const QString &p_server);
+
+    const QString &getPlantUMLJar() const;
+    void setPlantUMLJar(const QString &p_jarPath);
+
+    const QStringList &getPlantUMLArgs() const;
+    const QString &getPlantUMLCmd() const;
+
+    const QString &getGraphvizDot() const;
+    void setGraphvizDot(const QString &p_dotPath);
+
+    int getNoteListViewOrder() const;
+    void setNoteListViewOrder(int p_order);
+
+    int getOutlineExpandedLevel() const;
+    void setOutlineExpandedLevel(int p_level);
+
+    const QString &getImageNamePrefix() const;
 
 private:
     // Look up a config from user and default settings.
@@ -478,8 +568,6 @@ private:
 
     void updateMarkdownEditStyle();
 
-    // See if the old c_obsoleteDirConfigFile exists. If so, rename it to
-    // the new one; if not, use the c_dirConfigFile.
     static QString fetchDirConfigFilePath(const QString &p_path);
 
     // Read the [shortcuts] section in settings to init m_shortcuts.
@@ -506,6 +594,10 @@ private:
 
     // Init the themes name-file mappings.
     void initThemes();
+
+    // Output built-in themes to user theme folder if there does not exists folders
+    // with the same name.
+    void outputBuiltInThemes();
 
     // Init the editor styles name-file mappings.
     void initEditorStyles();
@@ -567,13 +659,6 @@ private:
 
     QString curRenderBackgroundColor;
 
-    bool m_toolsDockChecked;
-
-    QByteArray m_mainWindowGeometry;
-    QByteArray m_mainWindowState;
-    QByteArray m_mainSplitterState;
-    QByteArray m_naviSplitterState;
-
     // Find/Replace dialog options
     bool m_findCaseSensitive;
     bool m_findWholeWordOnly;
@@ -592,8 +677,16 @@ private:
     // Enable Mathjax.
     bool m_enableMathjax;
 
+    // Enable Graphviz.
+    bool m_enableGraphviz;
+
+    QString m_graphvizDot;
+
     // Zoom factor of the QWebEngineView.
     qreal m_webZoomFactor;
+
+    // Editor zoom delta.
+    int m_editorZoomDelta;
 
     // Current line background color in editor.
     QString m_editorCurrentLineBg;
@@ -696,7 +789,7 @@ private:
     // [DocType] -> { Suffixes }.
     QHash<int, QList<QString>> m_docSuffixes;
 
-    // Interval for HGMarkdownHighlighter highlight timer (milliseconds).
+    // Interval for PegMarkdownHighlighter highlight timer (milliseconds).
     int m_markdownHighlightInterval;
 
     // Line distance height in pixel.
@@ -729,17 +822,14 @@ private:
     // The foreground color of the preview image line.
     QString m_editorPreviewImageLineFg;
 
+    // The forced background color of the preview image. Can be empty.
+    QString m_editorPreviewImageBg;
+
     // Icon size of tool bar in pixels.
     int m_toolBarIconSize;
 
-    // Eanble HTML tags in source.
-    bool m_markdownitOptHtml;
-
-    // Convert '\n' in paragraphs into <br>.
-    bool m_markdownitOptBreaks;
-
-    // Auto-convert URL-like text to links.
-    bool m_markdownitOptLinkify;
+    // Markdown-it option.
+    MarkdownitOption m_markdownItOpt;
 
     // Default name of the recycle bin folder of notebook.
     QString m_recycleBinFolder;
@@ -759,9 +849,6 @@ private:
     // Whether double click on a tab to close it.
     bool m_doubleClickCloseTab;
 
-    // Whether put folder and note panel in one single column.
-    bool m_enableCompactMode;
-
     // Type of the pages to open on startup.
     StartupPageType m_startupPageType;
 
@@ -776,9 +863,6 @@ private:
 
     // Extension of the backup file.
     QString m_backupExtension;
-
-    // Whether enable backup file.
-    bool m_enableBackupFile;
 
     // Skipped keys in Vim mode.
     // c: Ctrl+C
@@ -819,21 +903,43 @@ private:
     // Whether close note before open it via external editor.
     bool m_closeBeforeExternalEditor;
 
-    // Whether user has reset the configurations.
-    bool m_hasReset;
-
-    // Whether fix the local relative image src in read mode when copied.
-    bool m_fixImageSrcInWebWhenCopied;
-
-    // Styles to be removed when copied in read mode.
-    QStringList m_stylesToRemoveWhenCopied;
-
     // The string containing styles to inline when copied in edit mode.
     QString m_stylesToInlineWhenCopied;
 
-    // The name of the config file in each directory, obsolete.
-    // Use c_dirConfigFile instead.
-    static const QString c_obsoleteDirConfigFile;
+    // Single click to open file and then close previous tab.
+    bool m_singleClickClosePreviousTab;
+
+    // Whether flash anchor in read mode.
+    bool m_enableFlashAnchor;
+
+    // PlantUML mode.
+    int m_plantUMLMode;
+
+    QString m_plantUMLServer;
+
+    QString m_plantUMLJar;
+
+    QStringList m_plantUMLArgs;
+
+    QString m_plantUMLCmd;
+
+    // Size of history.
+    int m_historySize;
+
+    // View order of note list.
+    int m_noteListViewOrder;
+
+    // Current entry index of explorer entries.
+    int m_explorerCurrentIndex;
+
+    // Whether user has reset the configurations.
+    bool m_hasReset;
+
+    // Expanded level of outline.
+    int m_outlineExpandedLevel;
+
+    // Prefix of the name of inserted images.
+    QString m_imageNamePrefix;
 
     // The name of the config file in each directory.
     static const QString c_dirConfigFile;
@@ -877,15 +983,18 @@ private:
 
     // The folder name to store all notebooks if user does not specify one.
     static const QString c_vnoteNotebookFolderName;
+
+    // The default export output folder name.
+    static const QString c_exportFolderName;
 };
 
 
-inline QFont VConfigManager::getMdEditFont() const
+inline const QFont &VConfigManager::getMdEditFont() const
 {
     return mdEditFont;
 }
 
-inline QPalette VConfigManager::getMdEditPalette() const
+inline const QPalette &VConfigManager::getMdEditPalette() const
 {
     return mdEditPalette;
 }
@@ -928,6 +1037,16 @@ inline void VConfigManager::setCurNotebookIndex(int index)
 
     curNotebookIndex = index;
     setConfigToSessionSettings("global", "current_notebook", index);
+}
+
+inline int VConfigManager::getNaviBoxCurrentIndex() const
+{
+    return getConfigFromSessionSettings("global", "navibox_current_index").toInt();
+}
+
+inline void VConfigManager::setNaviBoxCurrentIndex(int p_index)
+{
+    setConfigToSessionSettings("global", "navibox_current_index", p_index);
 }
 
 inline void VConfigManager::getNotebooks(QVector<VNotebook *> &p_notebooks,
@@ -1115,66 +1234,91 @@ inline void VConfigManager::setCurRenderBackgroundColor(const QString &colorName
 
 inline bool VConfigManager::getToolsDockChecked() const
 {
-    return m_toolsDockChecked;
+    return getConfigFromSettings("global", "tools_dock_checked").toBool();
 }
 
 inline void VConfigManager::setToolsDockChecked(bool p_checked)
 {
-    m_toolsDockChecked = p_checked;
-    setConfigToSettings("global", "tools_dock_checked",
-                        m_toolsDockChecked);
+    setConfigToSettings("global",
+                        "tools_dock_checked",
+                        p_checked);
 }
 
-inline const QByteArray& VConfigManager::getMainWindowGeometry() const
+inline bool VConfigManager::getSearchDockChecked() const
 {
-    return m_mainWindowGeometry;
+    return getConfigFromSettings("global", "search_dock_checked").toBool();
+}
+
+inline void VConfigManager::setSearchDockChecked(bool p_checked)
+{
+    setConfigToSettings("global",
+                        "search_dock_checked",
+                        p_checked);
+}
+
+inline const QByteArray VConfigManager::getMainWindowGeometry() const
+{
+    return getConfigFromSessionSettings("geometry",
+                                        "main_window_geometry").toByteArray();
 }
 
 inline void VConfigManager::setMainWindowGeometry(const QByteArray &p_geometry)
 {
-    m_mainWindowGeometry = p_geometry;
     setConfigToSessionSettings("geometry",
                                "main_window_geometry",
-                               m_mainWindowGeometry);
+                               p_geometry);
 }
 
-inline const QByteArray& VConfigManager::getMainWindowState() const
+inline const QByteArray VConfigManager::getMainWindowState() const
 {
-    return m_mainWindowState;
+    return getConfigFromSessionSettings("geometry",
+                                        "main_window_state").toByteArray();
 }
 
 inline void VConfigManager::setMainWindowState(const QByteArray &p_state)
 {
-    m_mainWindowState = p_state;
     setConfigToSessionSettings("geometry",
                                "main_window_state",
-                               m_mainWindowState);
+                               p_state);
 }
 
-inline const QByteArray& VConfigManager::getMainSplitterState() const
+inline const QByteArray VConfigManager::getMainSplitterState() const
 {
-    return m_mainSplitterState;
+    return getConfigFromSessionSettings("geometry",
+                                        "main_splitter_state").toByteArray();
 }
 
 inline void VConfigManager::setMainSplitterState(const QByteArray &p_state)
 {
-    m_mainSplitterState = p_state;
     setConfigToSessionSettings("geometry",
                                "main_splitter_state",
-                               m_mainSplitterState);
+                               p_state);
 }
 
-inline const QByteArray& VConfigManager::getNaviSplitterState() const
+inline const QByteArray VConfigManager::getNotebookSplitterState() const
 {
-    return m_naviSplitterState;
+    return getConfigFromSessionSettings("geometry",
+                                        "notebook_splitter_state").toByteArray();
 }
 
-inline void VConfigManager::setNaviSplitterState(const QByteArray &p_state)
+inline void VConfigManager::setNotebookSplitterState(const QByteArray &p_state)
 {
-    m_naviSplitterState = p_state;
     setConfigToSessionSettings("geometry",
-                               "navi_splitter_state",
-                               m_naviSplitterState);
+                               "notebook_splitter_state",
+                               p_state);
+}
+
+inline const QByteArray VConfigManager::getTagExplorerSplitterState() const
+{
+    return getConfigFromSessionSettings("geometry",
+                                        "tag_explorer_splitter_state").toByteArray();
+}
+
+inline void VConfigManager::setTagExplorerSplitterState(const QByteArray &p_state)
+{
+    setConfigToSessionSettings("geometry",
+                               "tag_explorer_splitter_state",
+                               p_state);
 }
 
 inline bool VConfigManager::getFindCaseSensitive() const
@@ -1289,8 +1433,39 @@ inline void VConfigManager::setEnableMathjax(bool p_enabled)
     if (m_enableMathjax == p_enabled) {
         return;
     }
+
     m_enableMathjax = p_enabled;
     setConfigToSettings("global", "enable_mathjax", m_enableMathjax);
+}
+
+inline bool VConfigManager::getEnableGraphviz() const
+{
+    return m_enableGraphviz;
+}
+
+inline void VConfigManager::setEnableGraphviz(bool p_enabled)
+{
+    if (m_enableGraphviz == p_enabled) {
+        return;
+    }
+
+    m_enableGraphviz = p_enabled;
+    setConfigToSettings("global", "enable_graphviz", m_enableGraphviz);
+}
+
+inline int VConfigManager::getPlantUMLMode() const
+{
+    return m_plantUMLMode;
+}
+
+inline void VConfigManager::setPlantUMLMode(int p_mode)
+{
+    if (m_plantUMLMode == p_mode) {
+        return;
+    }
+
+    m_plantUMLMode = p_mode;
+    setConfigToSettings("global", "plantuml_mode", p_mode);
 }
 
 inline qreal VConfigManager::getWebZoomFactor() const
@@ -1303,6 +1478,21 @@ inline bool VConfigManager::isCustomWebZoomFactor()
     qreal factorFromIni = getConfigFromSettings("global", "web_zoom_factor").toReal();
     // -1 indicates let system automatically calculate the factor.
     return factorFromIni > 0;
+}
+
+inline int VConfigManager::getEditorZoomDelta() const
+{
+    return m_editorZoomDelta;
+}
+
+inline void VConfigManager::setEditorZoomDelta(int p_delta)
+{
+    if (m_editorZoomDelta == p_delta) {
+        return;
+    }
+
+    m_editorZoomDelta = p_delta;
+    setConfigToSettings("global", "editor_zoom_delta", m_editorZoomDelta);
 }
 
 inline const QString &VConfigManager::getEditorCurrentLineBg() const
@@ -1732,6 +1922,11 @@ inline const QString &VConfigManager::getEditorPreviewImageLineFg() const
     return m_editorPreviewImageLineFg;
 }
 
+inline const QString &VConfigManager::getEditorPreviewImageBg() const
+{
+    return m_editorPreviewImageBg;
+}
+
 inline bool VConfigManager::getEnableCodeBlockLineNumber() const
 {
     return m_enableCodeBlockLineNumber;
@@ -1754,35 +1949,30 @@ inline int VConfigManager::getToolBarIconSize() const
     return m_toolBarIconSize;
 }
 
-inline MarkdownitOption VConfigManager::getMarkdownitOption() const
+inline void VConfigManager::setToolBarIconSize(int p_size)
 {
-    return MarkdownitOption(m_markdownitOptHtml,
-                            m_markdownitOptBreaks,
-                            m_markdownitOptLinkify);
+    if (m_toolBarIconSize == p_size) {
+        return;
+    }
+
+    m_toolBarIconSize  = p_size;
+    setConfigToSettings("global",
+                        "tool_bar_icon_size",
+                        m_toolBarIconSize);
+}
+inline const MarkdownitOption &VConfigManager::getMarkdownitOption() const
+{
+    return m_markdownItOpt;
 }
 
 inline void VConfigManager::setMarkdownitOption(const MarkdownitOption &p_opt)
 {
-    if (m_markdownitOptHtml != p_opt.m_html) {
-        m_markdownitOptHtml = p_opt.m_html;
-        setConfigToSettings("global",
-                            "markdownit_opt_html",
-                            m_markdownitOptHtml);
+    if (m_markdownItOpt == p_opt) {
+        return;
     }
 
-    if (m_markdownitOptBreaks != p_opt.m_breaks) {
-        m_markdownitOptBreaks = p_opt.m_breaks;
-        setConfigToSettings("global",
-                            "markdownit_opt_breaks",
-                            m_markdownitOptBreaks);
-    }
-
-    if (m_markdownitOptLinkify != p_opt.m_linkify) {
-        m_markdownitOptLinkify = p_opt.m_linkify;
-        setConfigToSettings("global",
-                            "markdownit_opt_linkify",
-                            m_markdownitOptLinkify);
-    }
+    m_markdownItOpt = p_opt;
+    setConfigToSettings("web", "markdownit_opt", m_markdownItOpt.toConfig());
 }
 
 inline const QString &VConfigManager::getRecycleBinFolder() const
@@ -1834,24 +2024,25 @@ inline const QString &VConfigManager::getMathjaxJavascript() const
     return m_mathjaxJavascript;
 }
 
-inline bool VConfigManager::getDoubleClickCloseTab() const
+inline void VConfigManager::setMathjaxJavascript(const QString &p_js)
 {
-    return m_doubleClickCloseTab;
-}
-
-inline bool VConfigManager::getEnableCompactMode() const
-{
-    return m_enableCompactMode;
-}
-
-inline void VConfigManager::setEnableCompactMode(bool p_enabled)
-{
-    if (m_enableCompactMode == p_enabled) {
+    if (m_mathjaxJavascript == p_js) {
         return;
     }
 
-    m_enableCompactMode = p_enabled;
-    setConfigToSettings("global", "enable_compact_mode", m_enableCompactMode);
+    if (p_js.isEmpty()) {
+        m_mathjaxJavascript = resetDefaultConfig("web", "mathjax_javascript").toString();
+    } else {
+        m_mathjaxJavascript = p_js;
+        setConfigToSettings("web",
+                            "mathjax_javascript",
+                            m_mathjaxJavascript);
+    }
+}
+
+inline bool VConfigManager::getDoubleClickCloseTab() const
+{
+    return m_doubleClickCloseTab;
 }
 
 inline StartupPageType VConfigManager::getStartupPageType() const
@@ -1901,7 +2092,13 @@ inline const QString &VConfigManager::getBackupExtension() const
 
 inline bool VConfigManager::getEnableBackupFile() const
 {
-    return m_enableBackupFile;
+    return getConfigFromSettings("global",
+                                 "enable_backup_file").toBool();
+}
+
+inline void VConfigManager::setEnableBackupFile(bool p_enabled)
+{
+    setConfigToSettings("global", "enable_backup_file", p_enabled);
 }
 
 inline const QString &VConfigManager::getVimExemptionKeys() const
@@ -1998,18 +2195,263 @@ inline bool VConfigManager::getCloseBeforeExternalEditor() const
     return m_closeBeforeExternalEditor;
 }
 
-inline bool VConfigManager::getFixImageSrcInWebWhenCopied() const
+inline QStringList VConfigManager::getStylesToRemoveWhenCopied() const
 {
-    return m_fixImageSrcInWebWhenCopied;
-}
+    return  getConfigFromSettings("web",
+                                  "styles_to_remove_when_copied").toStringList();
 
-inline const QStringList &VConfigManager::getStylesToRemoveWhenCopied() const
-{
-    return m_stylesToRemoveWhenCopied;
 }
 
 inline const QString &VConfigManager::getStylesToInlineWhenCopied() const
 {
     return m_stylesToInlineWhenCopied;
+}
+
+inline QStringList VConfigManager::getCopyTargets() const
+{
+    return getConfigFromSettings("web",
+                                 "copy_targets").toStringList();
+}
+
+inline QString VConfigManager::getStyleOfSpanForMark() const
+{
+    return getConfigFromSettings("web",
+                                 "style_of_span_for_mark").toString();
+}
+
+inline bool VConfigManager::getMenuBarChecked() const
+{
+    return getConfigFromSettings("global",
+                                 "menu_bar_checked").toBool();
+}
+
+inline void VConfigManager::setMenuBarChecked(bool p_checked)
+{
+    setConfigToSettings("global", "menu_bar_checked", p_checked);
+}
+
+inline bool VConfigManager::getToolBarChecked() const
+{
+    return getConfigFromSettings("global",
+                                 "tool_bar_checked").toBool();
+}
+
+inline void VConfigManager::setToolBarChecked(bool p_checked)
+{
+    setConfigToSettings("global", "tool_bar_checked", p_checked);
+}
+
+inline bool VConfigManager::getSingleClickClosePreviousTab() const
+{
+    return m_singleClickClosePreviousTab;
+}
+
+inline void VConfigManager::setSingleClickClosePreviousTab(bool p_enabled)
+{
+    if (m_singleClickClosePreviousTab == p_enabled) {
+        return;
+    }
+
+    m_singleClickClosePreviousTab = p_enabled;
+    setConfigToSettings("global", "single_click_close_previous_tab", m_singleClickClosePreviousTab);
+}
+
+inline bool VConfigManager::getEnableWildCardInSimpleSearch() const
+{
+    return getConfigFromSettings("global",
+                                 "enable_wildcard_in_simple_search").toBool();
+}
+
+inline bool VConfigManager::getEnableAutoSave() const
+{
+    return getConfigFromSettings("global",
+                                 "enable_auto_save").toBool();
+}
+
+inline void VConfigManager::setEnableAutoSave(bool p_enabled)
+{
+    setConfigToSettings("global", "enable_auto_save", p_enabled);
+}
+
+inline QString VConfigManager::getWkhtmltopdfPath() const
+{
+    return getConfigFromSettings("export",
+                                 "wkhtmltopdf").toString();
+}
+
+inline void VConfigManager::setWkhtmltopdfPath(const QString &p_file)
+{
+    setConfigToSettings("export", "wkhtmltopdf", p_file);
+}
+
+inline QString VConfigManager::getWkhtmltopdfArgs() const
+{
+    return getConfigFromSettings("export",
+                                 "wkhtmltopdfArgs").toString();
+}
+
+inline void VConfigManager::setWkhtmltopdfArgs(const QString &p_file)
+{
+    setConfigToSettings("export", "wkhtmltopdfArgs", p_file);
+}
+
+inline bool VConfigManager::getEnableFlashAnchor() const
+{
+    return m_enableFlashAnchor;
+}
+
+inline void VConfigManager::setEnableFlashAnchor(bool p_enabled)
+{
+    if (p_enabled == m_enableFlashAnchor) {
+        return;
+    }
+
+    m_enableFlashAnchor = p_enabled;
+    setConfigToSettings("web", "enable_flash_anchor", m_enableFlashAnchor);
+}
+
+inline QStringList VConfigManager::getCustomExport() const
+{
+    return getConfigFromSettings("export",
+                                 "custom_export").toStringList();
+}
+
+inline void VConfigManager::setCustomExport(const QStringList &p_exp)
+{
+    setConfigToSettings("export", "custom_export", p_exp);
+}
+
+inline QStringList VConfigManager::getSearchOptions() const
+{
+    return getConfigFromSettings("global",
+                                 "search_options").toStringList();
+}
+
+inline void VConfigManager::setSearchOptions(const QStringList &p_opts)
+{
+    setConfigToSettings("global", "search_options", p_opts);
+}
+
+inline const QString &VConfigManager::getPlantUMLServer() const
+{
+    return m_plantUMLServer;
+}
+
+inline void VConfigManager::setPlantUMLServer(const QString &p_server)
+{
+    if (m_plantUMLServer == p_server) {
+        return;
+    }
+
+    m_plantUMLServer = p_server;
+    setConfigToSettings("web", "plantuml_server", p_server);
+}
+
+inline const QString &VConfigManager::getPlantUMLJar() const
+{
+    return m_plantUMLJar;
+}
+
+inline void VConfigManager::setPlantUMLJar(const QString &p_jarPath)
+{
+    if (m_plantUMLJar == p_jarPath) {
+        return;
+    }
+
+    m_plantUMLJar = p_jarPath;
+    setConfigToSettings("web", "plantuml_jar", p_jarPath);
+}
+
+inline const QStringList &VConfigManager::getPlantUMLArgs() const
+{
+    return m_plantUMLArgs;
+}
+
+inline const QString &VConfigManager::getPlantUMLCmd() const
+{
+    return m_plantUMLCmd;
+}
+
+inline const QString &VConfigManager::getGraphvizDot() const
+{
+    return m_graphvizDot;
+}
+
+inline void VConfigManager::setGraphvizDot(const QString &p_dotPath)
+{
+    if (m_graphvizDot == p_dotPath) {
+        return;
+    }
+
+    m_graphvizDot = p_dotPath;
+    setConfigToSettings("web", "graphviz_dot", p_dotPath);
+}
+
+inline int VConfigManager::getHistorySize() const
+{
+    return m_historySize;
+}
+
+inline int VConfigManager::getNoteListViewOrder() const
+{
+    if (m_noteListViewOrder == -1) {
+        const_cast<VConfigManager *>(this)->m_noteListViewOrder = getConfigFromSettings("global", "note_list_view_order").toInt();
+    }
+
+    return m_noteListViewOrder;
+}
+
+inline void VConfigManager::setNoteListViewOrder(int p_order)
+{
+    if (m_noteListViewOrder == p_order) {
+        return;
+    }
+
+    m_noteListViewOrder = p_order;
+    setConfigToSettings("global", "note_list_view_order", m_noteListViewOrder);
+}
+
+inline int VConfigManager::getExplorerCurrentIndex() const
+{
+    if (m_explorerCurrentIndex == -1) {
+        const_cast<VConfigManager *>(this)->m_explorerCurrentIndex = getConfigFromSessionSettings("global", "explorer_current_entry").toInt();
+    }
+
+    return m_explorerCurrentIndex;
+}
+
+inline void VConfigManager::setExplorerCurrentIndex(int p_idx)
+{
+    if (p_idx == m_explorerCurrentIndex) {
+        return;
+    }
+
+    m_explorerCurrentIndex = p_idx;
+    setConfigToSessionSettings("global", "explorer_current_entry", m_explorerCurrentIndex);
+}
+
+inline QString VConfigManager::fetchDirConfigFilePath(const QString &p_path)
+{
+    return QDir(p_path).filePath(c_dirConfigFile);
+}
+
+inline int VConfigManager::getOutlineExpandedLevel() const
+{
+    return m_outlineExpandedLevel;
+}
+
+inline void VConfigManager::setOutlineExpandedLevel(int p_level)
+{
+    if (m_outlineExpandedLevel == p_level) {
+        return;
+    }
+
+    m_outlineExpandedLevel = p_level;
+    setConfigToSettings("global", "outline_expanded_level", m_outlineExpandedLevel);
+}
+
+inline const QString &VConfigManager::getImageNamePrefix() const
+{
+    return m_imageNamePrefix;
 }
 #endif // VCONFIGMANAGER_H

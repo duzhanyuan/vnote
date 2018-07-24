@@ -12,9 +12,8 @@
 #include "vconfigmanager.h"
 #include "utils/vutils.h"
 
-class HGMarkdownHighlighter;
-class VCodeBlockHighlightHelper;
 class VDocument;
+class PegMarkdownHighlighter;
 
 class VMdEdit : public VEdit
 {
@@ -109,8 +108,7 @@ private:
     // Index in m_headers of current header which contains the cursor.
     int indexOfCurrentHeader() const;
 
-    HGMarkdownHighlighter *m_mdHighlighter;
-    VCodeBlockHighlightHelper *m_cbHighlighter;
+    PegMarkdownHighlighter *m_mdHighlighter;
     // VImagePreviewer *m_imagePreviewer;
 
     // Image links inserted while editing.

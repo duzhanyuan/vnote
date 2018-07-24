@@ -29,7 +29,6 @@ SOURCES += main.cpp\
     vdocument.cpp \
     utils/vutils.cpp \
     vpreviewpage.cpp \
-    hgmarkdownhighlighter.cpp \
     vstyleparser.cpp \
     dialog/vnewnotebookdialog.cpp \
     vmarkdownconverter.cpp \
@@ -60,7 +59,6 @@ SOURCES += main.cpp\
     vorphanfile.cpp \
     vcodeblockhighlighthelper.cpp \
     vwebview.cpp \
-    vexporter.cpp \
     vmdtab.cpp \
     vhtmltab.cpp \
     utils/vvim.cpp \
@@ -106,7 +104,45 @@ SOURCES += main.cpp\
     dialog/vcopytextashtmldialog.cpp \
     vwaitingwidget.cpp \
     utils/vwebutils.cpp \
-    vlineedit.cpp
+    vlineedit.cpp \
+    vcart.cpp \
+    vvimcmdlineedit.cpp \
+    vlistwidget.cpp \
+    vsimplesearchinput.cpp \
+    vstyleditemdelegate.cpp \
+    vtreewidget.cpp \
+    dialog/vexportdialog.cpp \
+    vexporter.cpp \
+    vsearcher.cpp \
+    vsearch.cpp \
+    vsearchresulttree.cpp \
+    vsearchengine.cpp \
+    vuniversalentry.cpp \
+    vlistwidgetdoublerows.cpp \
+    vdoublerowitemwidget.cpp \
+    vsearchue.cpp \
+    voutlineue.cpp \
+    vhelpue.cpp \
+    vlistfolderue.cpp \
+    dialog/vfixnotebookdialog.cpp \
+    vplantumlhelper.cpp \
+    vgraphvizhelper.cpp \
+    vlivepreviewhelper.cpp \
+    vmathjaxpreviewhelper.cpp \
+    vmathjaxwebdocument.cpp \
+    vmathjaxinplacepreviewhelper.cpp \
+    vhistorylist.cpp \
+    vexplorer.cpp \
+    vlistue.cpp \
+    vuetitlecontentpanel.cpp \
+    utils/vprocessutils.cpp \
+    vtagpanel.cpp \
+    valltagspanel.cpp \
+    vtaglabel.cpp \
+    vtagexplorer.cpp \
+    pegmarkdownhighlighter.cpp \
+    pegparser.cpp \
+    peghighlighterresult.cpp
 
 HEADERS  += vmainwindow.h \
     vdirectorytree.h \
@@ -121,7 +157,6 @@ HEADERS  += vmainwindow.h \
     vdocument.h \
     utils/vutils.h \
     vpreviewpage.h \
-    hgmarkdownhighlighter.h \
     vstyleparser.h \
     dialog/vnewnotebookdialog.h \
     vmarkdownconverter.h \
@@ -152,7 +187,6 @@ HEADERS  += vmainwindow.h \
     vorphanfile.h \
     vcodeblockhighlighthelper.h \
     vwebview.h \
-    vexporter.h \
     vmdtab.h \
     vhtmltab.h \
     utils/vvim.h \
@@ -199,7 +233,53 @@ HEADERS  += vmainwindow.h \
     dialog/vcopytextashtmldialog.h \
     vwaitingwidget.h \
     utils/vwebutils.h \
-    vlineedit.h
+    vlineedit.h \
+    vcart.h \
+    vvimcmdlineedit.h \
+    vlistwidget.h \
+    vsimplesearchinput.h \
+    vstyleditemdelegate.h \
+    vtreewidget.h \
+    dialog/vexportdialog.h \
+    vexporter.h \
+    vwordcountinfo.h \
+    vsearcher.h \
+    vsearch.h \
+    vsearchresulttree.h \
+    isearchengine.h \
+    vsearchconfig.h \
+    vsearchengine.h \
+    vuniversalentry.h \
+    iuniversalentry.h \
+    vlistwidgetdoublerows.h \
+    vdoublerowitemwidget.h \
+    vsearchue.h \
+    voutlineue.h \
+    vhelpue.h \
+    vlistfolderue.h \
+    dialog/vfixnotebookdialog.h \
+    vplantumlhelper.h \
+    vgraphvizhelper.h \
+    vlivepreviewhelper.h \
+    vmathjaxpreviewhelper.h \
+    vmathjaxwebdocument.h \
+    vmathjaxinplacepreviewhelper.h \
+    markdownitoption.h \
+    vhistorylist.h \
+    vhistoryentry.h \
+    vexplorer.h \
+    vexplorerentry.h \
+    vlistue.h \
+    vuetitlecontentpanel.h \
+    utils/vprocessutils.h \
+    vtagpanel.h \
+    valltagspanel.h \
+    vtaglabel.h \
+    vtagexplorer.h \
+    markdownhighlighterdata.h \
+    pegmarkdownhighlighter.h \
+    pegparser.h \
+    peghighlighterresult.h
 
 RESOURCES += \
     vnote.qrc \
@@ -271,6 +351,9 @@ unix:!macx {
 
     target.path = $${PREFIX}/bin
 
-    INSTALLS += target desktop icon16 icon32 icon48 icon64 icon128 icon256 iconsvg
+    lntarget.path = $${PREFIX}/bin
+    lntarget.extra = $(SYMLINK) $(QMAKE_TARGET) $(INSTALL_ROOT)$${PREFIX}/bin/vnote
+
+    INSTALLS += target lntarget desktop icon16 icon32 icon48 icon64 icon128 icon256 iconsvg
     message("VNote will be installed in prefix $${PREFIX}")
 }

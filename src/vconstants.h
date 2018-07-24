@@ -2,6 +2,9 @@
 #define VCONSTANTS_H
 
 #include <QString>
+#include <QStringList>
+
+typedef unsigned long long TimeStamp;
 
 // Html: rich text file;
 // Markdown: Markdown text file;
@@ -29,14 +32,22 @@ enum class OpenFileMode {Read = 0, Edit, Invalid };
 static const qreal c_webZoomFactorMax = 5;
 static const qreal c_webZoomFactorMin = 0.25;
 
+static const int c_editorZoomDeltaMax = 10;
+static const int c_editorZoomDeltaMin = -10;
+
 static const int c_tabSequenceBase = 1;
 
 // HTML and JS.
 namespace HtmlHolder
 {
     static const QString c_JSHolder = "JS_PLACE_HOLDER";
+    static const QString c_cssHolder = "CSS_PLACE_HOLDER";
+    static const QString c_codeBlockCssHolder = "HIGHLIGHTJS_CSS_PLACE_HOLDER";
+    static const QString c_globalStyleHolder = "/* STYLE_GLOBAL_PLACE_HOLDER */";
     static const QString c_extraHolder = "<!-- EXTRA_PLACE_HOLDER -->";
     static const QString c_bodyHolder = "<!-- BODY_PLACE_HOLDER -->";
+    static const QString c_headHolder = "<!-- HEAD_PLACE_HOLDER -->";
+    static const QString c_styleHolder = "/* STYLE_PLACE_HOLDER */";
 }
 
 // Directory Config file items.
@@ -49,6 +60,7 @@ namespace DirConfig
     static const QString c_imageFolder = "image_folder";
     static const QString c_attachmentFolder = "attachment_folder";
     static const QString c_recycleBinFolder = "recycle_bin_folder";
+    static const QString c_tags = "tags";
     static const QString c_name = "name";
     static const QString c_createdTime = "created_time";
     static const QString c_modifiedTime = "modified_time";
@@ -109,8 +121,7 @@ enum HighlightBlockState
     CodeBlock,
     CodeBlockEnd,
 
-    // This block is inside a HTML comment region.
-    Comment
+    HRule
 };
 
 // Pages to open on start up.
@@ -141,4 +152,18 @@ enum class UpdateAction
     Moved
 };
 
+enum MarkdownConverterType
+{
+    Hoedown = 0,
+    Marked,
+    MarkdownIt,
+    Showdown
+};
+
+enum PlantUMLMode
+{
+    DisablePlantUML = 0,
+    OnlinePlantUML = 1,
+    LocalPlantUML = 2
+};
 #endif

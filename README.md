@@ -1,6 +1,12 @@
 # VNote
 [中文 Chinese](./README_zh.md)
 
+[VNote Homepage](https://tamlok.github.io/vnote)
+
+[Documentation](http://vnote.readthedocs.io/en/latest/)
+
+[Screenshots](https://tamlok.github.io/vnote/gallery.html)
+
 Designed specially for **Markdown**, **VNote** is a Vim-inspired note-taking application, which knows programmers and Markdown better.
 
 ![VNote](screenshots/vnote.png)
@@ -39,51 +45,87 @@ For other architectures, please search for `vnote` at [software.opensuse.org](ht
 
 We don't support Leap 42 and below due to the Qt version. Please use AppImage or build it yourself.
 
+### Arch Linux
+VNote on Arch Linux can be installed from the AUR as [vnote](https://aur.archlinux.org/packages/vnote/):
+
+```shell
+git clone https://aur.archlinux.org/vnote.git
+cd vnote
+makepkg -sic
+```
+
+There is also a development version that tracks the latest master [vnote-git](https://aur.archlinux.org/packages/vnote-git/).
+
 ## MacOS
 [![Build Status](https://travis-ci.org/tamlok/vnote.svg?branch=master)](https://travis-ci.org/tamlok/vnote)
 
 - [Github releases](https://github.com/tamlok/vnote/releases)
 - Latest builds on master: [ ![Download](https://api.bintray.com/packages/tamlok/vnote/vnote/images/download.svg) ](https://bintray.com/tamlok/vnote/vnote/_latestVersion)
 
+You can also install VNote using homebrew, through the cask tap:
+
+```shell
+brew cask install vnote
+```
+
 # Description
-**VNote** is a Qt-based, free and open source note-taking application, focusing on Markdown. VNote is designed to provide comfortable edit experience.
+**VNote** is a Qt-based, free and open source note-taking application, focusing on Markdown. VNote is designed to provide comfortable edit experience, especially for programmers.
 
 VNote is **NOT** just a simple editor for Markdown. By providing notes management, VNote makes taking notes in Markdown simpler and more pleasant.
 
 Utilizing Qt, VNote could run on **Linux**, **Windows**, and **macOS**.
 
-![VNote](screenshots/_vnote_1513485003_1746530034.png)
+![VNote Main Interface](screenshots/_vnotemaini_1525154456_1561295841.png)
 
 # Supports
 - [Github issues](https://github.com/tamlok/vnote/issues);
 - Email: tamlokveer at gmail.com;
-- QQ group: 487756074;
 - WeChat Public Account: VNote笔记 (vnote_md);  
 ![VNote WeChat](screenshots/vnote_md.jpg)
 
 # Highlights
-- Supports inserting images directly from clipboard;
-- Supports syntax highlights of fenced code blocks in both **edit** and **read** mode;
-- Supports outline in both edit and read mode;
-- Supports custom styles in both edit and read mode;
-- Supports Vim mode and a set of powerful shortcuts;
-- Supports infinite levels of folders;
-- Supports multiple tabs and splitting windows;
-- Supports [Mermaid](http://knsv.github.io/mermaid/), [Flowchart.js](http://flowchart.js.org/), and [MathJax](https://www.mathjax.org/);
+- Powerful **full-text search**;
+- **Universal Entry** to reach anything just by typing;
+- Inserting images directly from clipboard;
+- Syntax highlights of fenced code blocks in both **edit** and **read** mode;
+- Powerful **In-Place Preview** for images, diagrams, and formulas;
+- Side-by-side live preview for diagrams;
+- Outline in both edit and read mode;
+- Custom styles in both edit and read mode;
+- Vim mode and a set of powerful shortcuts;
+- Infinite levels of folders;
+- Multiple tabs and splitting windows;
+- [Mermaid](http://knsv.github.io/mermaid/), [Flowchart.js](http://flowchart.js.org/), [MathJax](https://www.mathjax.org/), [PlantUML](http://plantuml.com/), and [Graphviz](http://www.graphviz.org/);
 - Supports HiDPI;
-- Supports attachments of notes.
-- Supports themes and dark mode.
+- Attachments of notes;
+- Themes and dark mode;
+- Rich and extensible export, such as HTML, PDF, PDF (All In One), and images;
+
+# Donate
+You could help VNote's development in many ways.
+
+- Keep monitoring VNote and sending feedback for improvement.
+- Spread and promote VNote to your friends. Popularity is a strong power to drive developers.
+- Participate in the development of VNote and send PullRequest to make VNote perfect.
+- Last, really appreciate your donate to VNote if you think VNote really helps you and you want to help VNote.
+    - PayPal: [PayPal.Me/vnotemd](https://www.paypal.me/vnotemd)
+    - Alipay: `tamlokveer@gmail.com`  
+    ![Alipay](screenshots/alipay.png)
+    - WeChat  
+    ![WeChat Pay](screenshots/wechat_pay.png)
+
+Thanks very much to [them](https://github.com/tamlok/vnote/wiki/Donate-List) who donated to VNote!
 
 # Why VNote
 ## Markdown Editor & Notes Management
 VNote tries to be a powerful Markdown editor with notes management, or a note-taking application with pleasant Markdown support. If you are a fan of Markdown and enjoy writing Markdown notes for study, work, and life, VNote is the right tool for you.
 
 ## Pleasant Markdown Experience
-### Insight About Markdown
+### Insights About Markdown
 Markdown, as a simple mark language, unlike rich text, was born with a **gap between edit and read**. There are about three ways to handle this gap:
 
-1. As one extreme, some editors just tread Markdown as **plain text**. Users may lose themselves in the messy black characters. It is hard to keep track of the information of the note.
-2. Most Markdown editors use two panels to **edit and preview Markdown notes simultaneously**. It makes things easier since users could see a pleasant typesetting and layout while editing the text. However, two panels may occupy the whole screen and users keep moving eyes left and righti which will be a big distraction.
+1. As one extreme, some editors just treat Markdown as **plain text**. Users may lose themselves in the messy black characters. It is hard to keep track of the information of the note.
+2. Most Markdown editors use two panels to **edit and preview Markdown notes simultaneously**. It makes things easier since users could see a pleasant typesetting and layout while editing the text. However, two panels may occupy the whole screen and users keep moving eyes left and right which will be a big distraction.
 3. As another extreme, some editors convert the Markdown elements in place immediately after the typing, which makes editing Markdown just like editing rich text document in Word.
 
 Since most editors choose the second way to handle the gap, people always think of preview when it comes to Markdown. It may be a misunderstanding about Markdown. Designed as a simple mark language, Markdown is intended to help to keep track of the information of the text when editing and provide a beautiful typesetting when reading after being converted to HTML.
@@ -111,15 +153,24 @@ VNote also supports **syntax highlight for fenced code blocks** in edit mode in 
 
 ![Syntax Highlight](screenshots/_1513485266_1616037517.png)
 
-## Live Image Preview
-VNote supports previewing the image link in edit mode. With this, you could just stay in edit mode as much as possible.
+## In-Place Preview
+VNote supports powerful **in-place preview** for images, diagrams, and formulas in edit mode.
 
-![Live Image Preview](screenshots/_1513485934_140085443.png)
+![In-Place Preview](screenshots/_inplacepre_1525155248_405615820.png)
 
 ## Pleasant Image Experience
 Just paste your image into the Markdown note, VNote will manage all other stuffs. VNote stores images in a specified folder in the same folder with the note. VNote will pop up a window to preview the image when you insert an image. Furthermore, VNote will delete the useless image files automatically after you remove the image links.
 
-![](screenshots/_1513485753_394180887.png)
+![Pleasant Image Experience](screenshots/_1513485753_394180887.png)
+
+## Universal Entry & Full-Text Search
+VNote has powerful built-in full-text search with **Regular Expression** and **Fuzzy Search** support. The search could be executed wihtin all notebooks, current notebook, or current folder, targeted at name or content.
+
+![Full-Text Search](screenshots/_1522894671_1711734243.png)
+
+Like the `CtrlP` in Vim, VNote supports **Universal Entry** to reach anything by typing in a simple input.
+
+![Universal Entry](screenshots/_universale_1522894821_465772669.png)
 
 ## Interactive Outline Viewer In Read & Edit Mode
 VNote provides a user-friendly outline viewer for both edit and view mode. The outline viewer is a responsive item tree instead of a segment of HTML.
@@ -132,77 +183,6 @@ Please refer to the [shortcuts help](src/resources/docs/shortcuts_en.md) in the 
 ## Highly Configurable
 In VNote, almost everything is configurable, such as background color, font, and Markdown style. VNote uses a plaintext file to record all your configuration, so you could just copy that file to initialize a new VNote on another computer.
 
-## Others
-VNote also supports many other features, like:
-
-- Highlight current cursor line;
-- Highlight selected text;
-- Powerful search within the note;
-- Auto indent and auto list;
-
-# Build & Development
-VNote needs Qt 5.9.1 or above to build.
-
-1. Clone & Init
-    ```
-    git clone https://github.com/tamlok/vnote.git vnote.git
-    cd vnote.git
-    git submodule update --init
-    ```
-2. Download Qt & Have Fun  
-Download [Qt 5.9.1](http://info.qt.io/download-qt-for-application-development) and open `VNote.pro` as a project.
-
-## Linux
-If your distribution does not have Qt 5.9.1 or above, you need to add it from other sources. In Ubuntu, you could do this:
-
-```
-sudo add-apt-repository ppa:beineri/opt-qt591-trusty -y
-sudo apt-get update -qq
-sudo apt-get -y install qt59base qt59webengine qt59webchannel qt59svg qt59location qt59tools qt59translations
-source /opt/qt*/bin/qt*-env.sh
-```
-
-After Qt and some necessary modules are ready, you could follow these steps to build VNote
-
-```
-cd vnote.git
-mkdir build
-cd build
-qmake ../VNote.pro
-make
-sudo make install
-```
-
-For details, you could reference [.travis_linux.sh](.travis_linux.sh) in the source root.
-
-## MacOS
-If you prefer command line on macOS, you could follow these steps.
-
-1. Install Xcode and Homebrew;
-2. Install Qt 5.9.1 via Homebrew:
-    ```
-    brew install qt@5.9.1
-    ```
-3. In the project directory, create `build_macos.sh` like this:
-    ```sh
-    QTDIR="/usr/local/opt/qt@5.9.1"
-    PATH="$QTDIR/bin:$PATH"
-    LDFLAGS=-L$QTDIR/lib
-    CPPFLAGS=-I$QTDIR/include
-
-    mkdir -p build
-    cd build
-    qmake -v
-    qmake CONFIG-=debug CONFIG+=release ../VNote.pro
-    make -j2
-    ```
-4. Make `build_macos.sh` executable and run it:
-    ```sh
-    chmod +x build_macos.sh
-    ./build_macos.sh
-    ```
-5. Now you got the bundle `path/to/project/build/src/VNote.app`. Enjoy yourself!
-
 # Dependencies
 - [Qt 5.9](http://qt-project.org) (L-GPL v3)
 - [PEG Markdown Highlight](http://hasseg.org/peg-markdown-highlight/) (MIT License)
@@ -213,10 +193,19 @@ If you prefer command line on macOS, you could follow these steps.
 - [markdown-it 8.3.1](https://github.com/markdown-it/markdown-it) (MIT License)
 - [markdown-it-headinganchor 1.3.0](https://github.com/adam-p/markdown-it-headinganchor) (MIT License)
 - [markdown-it-task-lists 1.4.0](https://github.com/revin/markdown-it-task-lists) (ISC License)
+- [markdown-it-footnote](https://github.com/markdown-it/markdown-it-footnote) (MIT License)
+- [markdown-it-sub](https://github.com/markdown-it/markdown-it-sub) (MIT License)
+- [markdown-it-sup](https://github.com/markdown-it/markdown-it-sup) (MIT License)
+- [markdown-it-front-matter](https://github.com/craigdmckenna/markdown-it-front-matter) (MIT License)
+- [markdown-it-imsize](https://github.com/tatsy/markdown-it-imsize) (Unknown) (Thanks @Kinka for help)
+- [markdown-it-emoji](https://github.com/markdown-it/markdown-it-emoji) (MIT License)
+- [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath) (MIT License)
 - [mermaid 7.0.0](https://github.com/knsv/mermaid) (MIT License)
 - [MathJax](https://www.mathjax.org/) (Apache-2.0)
 - [showdown](https://github.com/showdownjs/showdown) (Unknown)
 - [flowchart.js](https://github.com/adrai/flowchart.js) (MIT License)
+- [PlantUML](http://plantuml.com/) (MIT License)
+- [dom-to-image](https://github.com/tsayen/dom-to-image) (MIT License)
 
 # License
 VNote is licensed under the [MIT license](http://opensource.org/licenses/MIT).

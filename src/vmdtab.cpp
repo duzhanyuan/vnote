@@ -2,12 +2,13 @@
 #include <QWebChannel>
 #include <QFileInfo>
 #include <QCoreApplication>
+#include <QWebEngineProfile>
 #include "vmdtab.h"
 #include "vdocument.h"
 #include "vnote.h"
 #include "utils/vutils.h"
 #include "vpreviewpage.h"
-#include "hgmarkdownhighlighter.h"
+#include "pegmarkdownhighlighter.h"
 #include "vconfigmanager.h"
 #include "vmarkdownconverter.h"
 #include "vnotebook.h"
@@ -21,10 +22,13 @@
 #include "vsnippet.h"
 #include "vinsertselector.h"
 #include "vsnippetlist.h"
+#include "vlivepreviewhelper.h"
+#include "vmathjaxinplacepreviewhelper.h"
 
 extern VMainWindow *g_mainWin;
 
 extern VConfigManager *g_config;
+
 
 VMdTab::VMdTab(VFile *p_file, VEditArea *p_editArea,
                OpenFileMode p_mode, QWidget *p_parent)
@@ -34,7 +38,10 @@ VMdTab::VMdTab(VFile *p_file, VEditArea *p_editArea,
       m_document(NULL),
       m_mdConType(g_config->getMdConverterType()),
       m_enableHeadingSequence(false),
-      m_backupFileChecked(false)
+      m_backupFileChecked(false),
+      m_mode(Mode::InvalidMode),
+      m_livePreviewHelper(NULL),
+      m_mathjaxPreviewHelper(NULL)
 {
     V_ASSERT(m_file->getDocType() == DocType::Markdown);
 
@@ -67,14 +74,18 @@ VMdTab::VMdTab(VFile *p_file, VEditArea *p_editArea,
 
 void VMdTab::setupUI()
 {
-    m_stacks = new QStackedLayout(this);
+    m_splitter = new QSplitter(this);
+    m_splitter->setOrientation(Qt::Horizontal);
 
     setupMarkdownViewer();
 
     // Setup editor when we really need it.
     m_editor = NULL;
 
-    setLayout(m_stacks);
+    QVBoxLayout *layout = new QVBoxLayout();
+    layout->addWidget(m_splitter);
+    layout->setContentsMargins(0, 0, 0, 0);
+    setLayout(layout);
 }
 
 void VMdTab::showFileReadMode()
@@ -84,17 +95,23 @@ void VMdTab::showFileReadMode()
     // Will recover the header when web side is ready.
     m_headerFromEditMode = m_currentHeader;
 
+    updateWebView();
+
+    setCurrentMode(Mode::Read);
+
+    clearSearchedWordHighlight();
+
+    updateStatus();
+}
+
+void VMdTab::updateWebView()
+{
     if (m_mdConType == MarkdownConverterType::Hoedown) {
         viewWebByConverter();
     } else {
         m_document->updateText();
         updateOutlineFromHtml(m_document->getToc());
     }
-
-    m_stacks->setCurrentWidget(m_webViewer);
-    clearSearchedWordHighlight();
-
-    updateStatus();
 }
 
 bool VMdTab::scrollWebViewToHeader(const VHeaderPointer &p_header)
@@ -210,14 +227,17 @@ void VMdTab::showFileEditMode()
 
     VMdEditor *mdEdit = getEditor();
 
-    m_stacks->setCurrentWidget(mdEdit);
+    setCurrentMode(Mode::Edit);
+
     mdEdit->beginEdit();
 
     // If editor is not init, we need to wait for it to init headers.
     // Generally, beginEdit() will generate the headers. Wait is needed when
     // highlight completion is going to re-generate the headers.
-    int nrRetry = 5;
-    while (header.m_index > -1 && m_outline.isEmpty() && nrRetry-- > 0) {
+    int nrRetry = 10;
+    while (header.m_index > -1
+           && nrRetry-- > 0
+           && (m_outline.isEmpty() || m_outline.getType() != VTableOfContentType::BlockNumber)) {
         qDebug() << "wait another 100 ms for editor's headers ready";
         VUtils::sleepWait(100);
     }
@@ -252,7 +272,7 @@ void VMdTab::editFile()
     showFileEditMode();
 }
 
-void VMdTab::readFile()
+void VMdTab::readFile(bool p_discard)
 {
     if (!m_isEditMode) {
         return;
@@ -270,7 +290,7 @@ void VMdTab::readFile()
                                                     | QMessageBox::Cancel)
                                                  : (QMessageBox::Discard
                                                     | QMessageBox::Cancel),
-                                      modifiable ? QMessageBox::Save
+                                      modifiable ? (p_discard ? QMessageBox::Discard: QMessageBox::Save)
                                                  : QMessageBox::Cancel,
                                       this);
         switch (ret) {
@@ -339,6 +359,7 @@ bool VMdTab::saveFile()
                             QMessageBox::Ok, QMessageBox::Ok, this);
         ret = false;
     } else {
+        m_checkFileChange = false;
         m_editor->saveFile();
         ret = m_file->save();
         if (!ret) {
@@ -382,15 +403,22 @@ void VMdTab::setupMarkdownViewer()
     m_webViewer = new VWebView(m_file, this);
     connect(m_webViewer, &VWebView::editNote,
             this, &VMdTab::editFile);
+    connect(m_webViewer, &VWebView::requestSavePage,
+            this, &VMdTab::handleSavePageRequested);
 
     VPreviewPage *page = new VPreviewPage(m_webViewer);
     m_webViewer->setPage(page);
     m_webViewer->setZoomFactor(g_config->getWebZoomFactor());
+    connect(page->profile(), &QWebEngineProfile::downloadRequested,
+            this, &VMdTab::handleDownloadRequested);
+    connect(page, &QWebEnginePage::linkHovered,
+            this, &VMdTab::statusMessage);
 
     // Avoid white flash before loading content.
     page->setBackgroundColor(Qt::transparent);
 
     m_document = new VDocument(m_file, m_webViewer);
+    m_documentID = m_document->registerIdentifier();
 
     QWebChannel *channel = new QWebChannel(m_webViewer);
     channel->registerObject(QStringLiteral("content"), m_document);
@@ -406,6 +434,7 @@ void VMdTab::setupMarkdownViewer()
                     // Recover header from edit mode.
                     scrollWebViewToHeader(m_headerFromEditMode);
                     m_headerFromEditMode.clear();
+                    m_document->muteWebView(false);
                     return;
                 }
 
@@ -414,17 +443,30 @@ void VMdTab::setupMarkdownViewer()
                 tabIsReady(TabReady::ReadMode);
             });
     connect(m_document, &VDocument::textToHtmlFinished,
-            this, [this](const QString &p_text, const QString &p_html) {
+            this, [this](int p_identitifer, int p_id, int p_timeStamp, const QString &p_html) {
                 Q_ASSERT(m_editor);
-                m_editor->textToHtmlFinished(p_text, m_webViewer->url(), p_html);
+                if (m_documentID != p_identitifer) {
+                    return;
+                }
+
+                m_editor->textToHtmlFinished(p_id, p_timeStamp, m_webViewer->url(), p_html);
+            });
+    connect(m_document, &VDocument::wordCountInfoUpdated,
+            this, [this]() {
+                VEditTabInfo info = fetchTabInfo(VEditTabInfo::InfoType::All);
+                if (m_isEditMode) {
+                    info.m_wordCountInfo = m_document->getWordCountInfo();
+                }
+
+                emit statusUpdated(info);
             });
 
     page->setWebChannel(channel);
 
-    m_webViewer->setHtml(VUtils::generateHtmlTemplate(m_mdConType, false),
+    m_webViewer->setHtml(VUtils::generateHtmlTemplate(m_mdConType),
                          m_file->getBaseUrl());
 
-    m_stacks->addWidget(m_webViewer);
+    m_splitter->addWidget(m_webViewer);
 }
 
 void VMdTab::setupMarkdownEditor()
@@ -433,6 +475,14 @@ void VMdTab::setupMarkdownEditor()
 
     m_editor = new VMdEditor(m_file, m_document, m_mdConType, this);
     m_editor->setProperty("MainEditor", true);
+    m_editor->setEditTab(this);
+    int delta = g_config->getEditorZoomDelta();
+    if (delta > 0) {
+        m_editor->zoomInW(delta);
+    } else if (delta < 0) {
+        m_editor->zoomOutW(-delta);
+    }
+
     connect(m_editor, &VMdEditor::headersChanged,
             this, &VMdTab::updateOutlineFromHeaders);
     connect(m_editor, SIGNAL(currentHeaderChanged(int)),
@@ -441,10 +491,10 @@ void VMdTab::setupMarkdownEditor()
             this, &VMdTab::updateStatus);
     connect(m_editor, &VMdEditor::textChanged,
             this, &VMdTab::updateStatus);
-    connect(m_editor, &VMdEditor::cursorPositionChanged,
-            this, &VMdTab::updateCursorStatus);
     connect(g_mainWin, &VMainWindow::editorConfigUpdated,
             m_editor, &VMdEditor::updateConfig);
+    connect(m_editor->object(), &VEditorObject::cursorPositionChanged,
+            this, &VMdTab::updateCursorStatus);
     connect(m_editor->object(), &VEditorObject::saveAndRead,
             this, &VMdTab::saveAndRead);
     connect(m_editor->object(), &VEditorObject::discardAndRead,
@@ -472,9 +522,40 @@ void VMdTab::setupMarkdownEditor()
     connect(m_editor, &VMdEditor::requestTextToHtml,
             this, &VMdTab::textToHtmlViaWebView);
 
+    if (m_editor->getVim()) {
+        connect(m_editor->getVim(), &VVim::commandLineTriggered,
+                this, [this](VVim::CommandLineType p_type) {
+                    if (m_isEditMode) {
+                        emit triggerVimCmd(p_type);
+                    }
+                });
+    }
+
     enableHeadingSequence(m_enableHeadingSequence);
     m_editor->reloadFile();
-    m_stacks->addWidget(m_editor);
+    m_splitter->insertWidget(0, m_editor);
+
+    m_livePreviewHelper = new VLivePreviewHelper(m_editor, m_document, this);
+    connect(m_editor->getMarkdownHighlighter(), &PegMarkdownHighlighter::codeBlocksUpdated,
+            m_livePreviewHelper, &VLivePreviewHelper::updateCodeBlocks);
+    connect(m_editor->getPreviewManager(), &VPreviewManager::previewEnabledChanged,
+            m_livePreviewHelper, &VLivePreviewHelper::setInplacePreviewEnabled);
+    connect(m_livePreviewHelper, &VLivePreviewHelper::inplacePreviewCodeBlockUpdated,
+            m_editor->getPreviewManager(), &VPreviewManager::updateCodeBlocks);
+    connect(m_livePreviewHelper, &VLivePreviewHelper::checkBlocksForObsoletePreview,
+            m_editor->getPreviewManager(), &VPreviewManager::checkBlocksForObsoletePreview);
+    m_livePreviewHelper->setInplacePreviewEnabled(m_editor->getPreviewManager()->isPreviewEnabled());
+
+    m_mathjaxPreviewHelper = new VMathJaxInplacePreviewHelper(m_editor, m_document, this);
+    connect(m_editor->getMarkdownHighlighter(), &PegMarkdownHighlighter::mathjaxBlocksUpdated,
+            m_mathjaxPreviewHelper, &VMathJaxInplacePreviewHelper::updateMathjaxBlocks);
+    connect(m_editor->getPreviewManager(), &VPreviewManager::previewEnabledChanged,
+            m_mathjaxPreviewHelper, &VMathJaxInplacePreviewHelper::setEnabled);
+    connect(m_mathjaxPreviewHelper, &VMathJaxInplacePreviewHelper::inplacePreviewMathjaxBlockUpdated,
+            m_editor->getPreviewManager(), &VPreviewManager::updateMathjaxBlocks);
+    connect(m_mathjaxPreviewHelper, &VMathJaxInplacePreviewHelper::checkBlocksForObsoletePreview,
+            m_editor->getPreviewManager(), &VPreviewManager::checkBlocksForObsoletePreview);
+    m_mathjaxPreviewHelper->setEnabled(m_editor->getPreviewManager()->isPreviewEnabled());
 }
 
 void VMdTab::updateOutlineFromHtml(const QString &p_tocHtml)
@@ -636,9 +717,16 @@ void VMdTab::clearSearchedWordHighlight()
     }
 }
 
-void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool /* p_shift */)
+void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift, bool p_meta)
 {
     V_ASSERT(m_webViewer);
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    bool macCtrl = p_meta;
+#else
+    Q_UNUSED(p_meta);
+    bool macCtrl = false;
+#endif
 
     switch (p_key) {
     // Esc
@@ -648,26 +736,67 @@ void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool /* p_shift */)
 
     // Dash
     case 189:
-        if (p_ctrl) {
+        if (p_ctrl || macCtrl) {
             // Zoom out.
             zoomWebPage(false);
         }
+
         break;
 
     // Equal
     case 187:
-        if (p_ctrl) {
+        if (p_ctrl || macCtrl) {
             // Zoom in.
             zoomWebPage(true);
         }
+
         break;
 
     // 0
     case 48:
-        if (p_ctrl) {
+        if (p_ctrl || macCtrl) {
             // Recover zoom.
             m_webViewer->setZoomFactor(1);
         }
+
+        break;
+
+    // / or ?
+    case 191:
+        if (!p_ctrl) {
+            VVim::CommandLineType type = VVim::CommandLineType::SearchForward;
+            if (p_shift) {
+                // ?, search backward.
+                type = VVim::CommandLineType::SearchBackward;
+            }
+
+            emit triggerVimCmd(type);
+        }
+
+        break;
+
+    // :
+    case 186:
+        if (!p_ctrl && p_shift) {
+            VVim::CommandLineType type = VVim::CommandLineType::Command;
+
+            emit triggerVimCmd(type);
+        }
+
+        break;
+
+    // n or N
+    case 78:
+        if (!p_ctrl) {
+            if (!m_lastSearchItem.isEmpty()) {
+                bool forward = !p_shift;
+                findTextInWebView(m_lastSearchItem.m_text,
+                                  m_lastSearchItem.m_options,
+                                  false,
+                                  forward ? m_lastSearchItem.m_forward : !m_lastSearchItem.m_forward);
+            }
+        }
+
         break;
 
     default:
@@ -677,9 +806,7 @@ void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool /* p_shift */)
 
 void VMdTab::zoom(bool p_zoomIn, qreal p_step)
 {
-    // Editor will handle it itself.
-    Q_ASSERT(!m_isEditMode);
-    if (!m_isEditMode) {
+    if (!m_isEditMode || m_mode == Mode::EditPreview) {
         zoomWebPage(p_zoomIn, p_step);
     }
 }
@@ -711,7 +838,11 @@ MarkdownConverterType VMdTab::getMarkdownConverterType() const
 
 void VMdTab::focusChild()
 {
-    m_stacks->currentWidget()->setFocus();
+    if (m_mode == Mode::Read) {
+        m_webViewer->setFocus();
+    } else {
+        m_editor->setFocus();
+    }
 }
 
 void VMdTab::requestUpdateVimStatus()
@@ -734,6 +865,16 @@ VEditTabInfo VMdTab::fetchTabInfo(VEditTabInfo::InfoType p_type) const
         info.m_blockCount = m_editor->document()->blockCount();
     }
 
+    if (m_isEditMode) {
+        if (m_editor) {
+            // We do not get the full word count info in edit mode.
+            info.m_wordCountInfo.m_mode = VWordCountInfo::Edit;
+            info.m_wordCountInfo.m_charWithSpacesCount = m_editor->document()->characterCount() - 1;
+        }
+    } else {
+        info.m_wordCountInfo = m_document->getWordCountInfo();
+    }
+
     info.m_headerIndex = m_currentHeader.m_index;
 
     return info;
@@ -752,9 +893,21 @@ bool VMdTab::restoreFromTabInfo(const VEditTabInfo &p_info)
         return false;
     }
 
+    bool ret = false;
+    // Restore cursor position.
+    if (m_isEditMode
+        && m_editor
+        && p_info.m_cursorBlockNumber > -1
+        && p_info.m_cursorPositionInBlock > -1) {
+        ret = m_editor->setCursorPosition(p_info.m_cursorBlockNumber, p_info.m_cursorPositionInBlock);
+    }
+
     // Restore header.
-    VHeaderPointer header(m_file, p_info.m_headerIndex);
-    bool ret = scrollToHeaderInternal(header);
+    if (!ret) {
+        VHeaderPointer header(m_file, p_info.m_headerIndex);
+        ret = scrollToHeaderInternal(header);
+    }
+
     return ret;
 }
 
@@ -773,6 +926,9 @@ void VMdTab::enableHeadingSequence(bool p_enabled)
     if (m_editor) {
         VEditConfig &config = m_editor->getConfig();
         config.m_enableHeadingSequence = m_enableHeadingSequence;
+        if (isEditMode()) {
+            m_editor->updateHeaderSequenceByConfigChange();
+        }
     }
 }
 
@@ -883,16 +1039,27 @@ VInsertSelector *VMdTab::prepareSnippetSelector(QWidget *p_parent)
 
 void VMdTab::reload()
 {
-    if (m_isEditMode) {
+    // Reload editor.
+    if (m_editor) {
         m_editor->reloadFile();
+    }
+
+    if (m_isEditMode) {
         m_editor->endEdit();
         m_editor->beginEdit();
         updateStatus();
-    } else {
-        if (m_editor) {
-            m_editor->reloadFile();
-        }
+    }
 
+    if (!m_isEditMode) {
+        updateWebView();
+    }
+
+    // Reload web viewer.
+    m_ready &= ~TabReady::ReadMode;
+    m_webViewer->reload();
+
+    if (!m_isEditMode) {
+        VUtils::sleepWait(500);
         showFileReadMode();
     }
 }
@@ -903,6 +1070,10 @@ void VMdTab::tabIsReady(TabReady p_mode)
                          || (!m_isEditMode && p_mode == TabReady::ReadMode);
 
     if (isCurrentMode) {
+        if (p_mode == TabReady::ReadMode) {
+            m_document->muteWebView(false);
+        }
+
         restoreFromTabInfo();
 
         if (m_enableBackupFile
@@ -926,6 +1097,13 @@ void VMdTab::tabIsReady(TabReady p_mode)
                     }
                 });
     }
+
+    if (m_editor
+        && p_mode == TabReady::ReadMode
+        && m_livePreviewHelper->isPreviewEnabled()) {
+        // Need to re-preview.
+        m_editor->getMarkdownHighlighter()->updateHighlight();
+    }
 }
 
 void VMdTab::writeBackupFile()
@@ -943,6 +1121,14 @@ bool VMdTab::checkPreviousBackupFile()
         return true;
     }
 
+    QString backupContent = m_file->readBackupFile(preFile);
+    if (m_file->getContent() == backupContent) {
+        // Found backup file with identical content.
+        // Just discard the backup file.
+        VUtils::deleteFile(preFile);
+        return true;
+    }
+
     QMessageBox box(QMessageBox::Warning,
                     tr("Backup File Found"),
                     tr("Found backup file <span style=\"%1\">%2</span> "
@@ -952,17 +1138,13 @@ bool VMdTab::checkPreviousBackupFile()
                       .arg(m_file->fetchPath()),
                     QMessageBox::NoButton,
                     this);
-    QString backupContent = m_file->readBackupFile(preFile);
     QString info = tr("VNote may crash while editing this note before.<br/>"
                       "Please choose to recover from the backup file or delete it.<br/><br/>"
                       "Note file last modified: <span style=\"%1\">%2</span><br/>"
-                      "Backup file last modified: <span style=\"%1\">%3</span><br/>"
-                      "Content comparison: <span style=\"%1\">%4</span>")
+                      "Backup file last modified: <span style=\"%1\">%3</span>")
                      .arg(g_config->c_dataTextStyle)
                      .arg(VUtils::displayDateTime(QFileInfo(m_file->fetchPath()).lastModified()))
-                     .arg(VUtils::displayDateTime(QFileInfo(preFile).lastModified()))
-                     .arg(m_file->getContent() == backupContent ? tr("Identical")
-                                                                : tr("Different"));
+                     .arg(VUtils::displayDateTime(QFileInfo(preFile).lastModified()));
     box.setInformativeText(info);
     QPushButton *recoverBtn = box.addButton(tr("Recover From Backup File"), QMessageBox::YesRole);
     box.addButton(tr("Discard Backup File"), QMessageBox::NoRole);
@@ -1003,7 +1185,7 @@ void VMdTab::handleFileOrDirectoryChange(bool p_isFile, UpdateAction p_act)
 {
     // Reload the web view with new base URL.
     m_headerFromEditMode = m_currentHeader;
-    m_webViewer->setHtml(VUtils::generateHtmlTemplate(m_mdConType, false),
+    m_webViewer->setHtml(VUtils::generateHtmlTemplate(m_mdConType),
                          m_file->getBaseUrl());
 
     if (m_editor) {
@@ -1014,7 +1196,7 @@ void VMdTab::handleFileOrDirectoryChange(bool p_isFile, UpdateAction p_act)
     }
 }
 
-void VMdTab::textToHtmlViaWebView(const QString &p_text)
+void VMdTab::textToHtmlViaWebView(const QString &p_text, int p_id, int p_timeStamp)
 {
     int maxRetry = 50;
     while (!m_document->isReadyToTextToHtml() && maxRetry > 0) {
@@ -1028,5 +1210,301 @@ void VMdTab::textToHtmlViaWebView(const QString &p_text)
         return;
     }
 
-    m_document->textToHtmlAsync(p_text);
+    m_document->textToHtmlAsync(m_documentID, p_id, p_timeStamp, p_text, true);
+}
+
+void VMdTab::handleVimCmdCommandCancelled()
+{
+    if (m_isEditMode) {
+        VVim *vim = getEditor()->getVim();
+        if (vim) {
+            vim->processCommandLineCancelled();
+        }
+    }
+}
+
+void VMdTab::handleVimCmdCommandFinished(VVim::CommandLineType p_type, const QString &p_cmd)
+{
+    if (m_isEditMode) {
+        VVim *vim = getEditor()->getVim();
+        if (vim) {
+            vim->processCommandLine(p_type, p_cmd);
+        }
+    } else {
+        if (p_type == VVim::CommandLineType::SearchForward
+            || p_type == VVim::CommandLineType::SearchBackward) {
+            m_lastSearchItem = VVim::fetchSearchItem(p_type, p_cmd);
+            findTextInWebView(m_lastSearchItem.m_text,
+                              m_lastSearchItem.m_options,
+                              false,
+                              m_lastSearchItem.m_forward);
+        } else {
+            executeVimCommandInWebView(p_cmd);
+        }
+    }
+}
+
+void VMdTab::handleVimCmdCommandChanged(VVim::CommandLineType p_type, const QString &p_cmd)
+{
+    Q_UNUSED(p_type);
+    Q_UNUSED(p_cmd);
+    if (m_isEditMode) {
+        VVim *vim = getEditor()->getVim();
+        if (vim) {
+            vim->processCommandLineChanged(p_type, p_cmd);
+        }
+    } else {
+        if (p_type == VVim::CommandLineType::SearchForward
+            || p_type == VVim::CommandLineType::SearchBackward) {
+            VVim::SearchItem item = VVim::fetchSearchItem(p_type, p_cmd);
+            findTextInWebView(item.m_text, item.m_options, true, item.m_forward);
+        }
+    }
+}
+
+QString VMdTab::handleVimCmdRequestNextCommand(VVim::CommandLineType p_type, const QString &p_cmd)
+{
+    Q_UNUSED(p_type);
+    Q_UNUSED(p_cmd);
+    if (m_isEditMode) {
+        VVim *vim = getEditor()->getVim();
+        if (vim) {
+            return vim->getNextCommandHistory(p_type, p_cmd);
+        }
+    }
+
+    return QString();
+}
+
+QString VMdTab::handleVimCmdRequestPreviousCommand(VVim::CommandLineType p_type, const QString &p_cmd)
+{
+    Q_UNUSED(p_type);
+    Q_UNUSED(p_cmd);
+    if (m_isEditMode) {
+        VVim *vim = getEditor()->getVim();
+        if (vim) {
+            return vim->getPreviousCommandHistory(p_type, p_cmd);
+        }
+    }
+
+    return QString();
+}
+
+QString VMdTab::handleVimCmdRequestRegister(int p_key, int p_modifiers)
+{
+    Q_UNUSED(p_key);
+    Q_UNUSED(p_modifiers);
+    if (m_isEditMode) {
+        VVim *vim = getEditor()->getVim();
+        if (vim) {
+            return vim->readRegister(p_key, p_modifiers);
+        }
+    }
+
+    return QString();
+}
+
+bool VMdTab::executeVimCommandInWebView(const QString &p_cmd)
+{
+    bool validCommand = true;
+    QString msg;
+
+    if (p_cmd.isEmpty()) {
+        return true;
+    } else if (p_cmd == "q") {
+        // :q, close the note.
+        emit closeRequested(this);
+        msg = tr("Quit");
+    } else if (p_cmd == "nohlsearch" || p_cmd == "noh") {
+        // :nohlsearch, clear highlight search.
+        m_webViewer->findText("");
+    } else {
+        validCommand = false;
+    }
+
+    if (!validCommand) {
+        g_mainWin->showStatusMessage(tr("Not an editor command: %1").arg(p_cmd));
+    } else {
+        g_mainWin->showStatusMessage(msg);
+    }
+
+    return validCommand;
+}
+
+void VMdTab::handleDownloadRequested(QWebEngineDownloadItem *p_item)
+{
+    connect(p_item, &QWebEngineDownloadItem::stateChanged,
+            this, [p_item, this](QWebEngineDownloadItem::DownloadState p_state) {
+                QString msg;
+                switch (p_state) {
+                case QWebEngineDownloadItem::DownloadCompleted:
+                    emit statusMessage(tr("Page saved to %1").arg(p_item->path()));
+                    break;
+
+                case QWebEngineDownloadItem::DownloadCancelled:
+                case QWebEngineDownloadItem::DownloadInterrupted:
+                    emit statusMessage(tr("Fail to save page to %1").arg(p_item->path()));
+                    break;
+
+                default:
+                    break;
+                }
+            });
+}
+
+void VMdTab::handleSavePageRequested()
+{
+    static QString lastPath = g_config->getDocumentPathOrHomePath();
+
+    QStringList filters;
+    filters << tr("Single HTML (*.html)") << tr("Complete HTML (*.html)") << tr("MIME HTML (*.mht)");
+    QList<QWebEngineDownloadItem::SavePageFormat> formats;
+    formats << QWebEngineDownloadItem::SingleHtmlSaveFormat
+            << QWebEngineDownloadItem::CompleteHtmlSaveFormat
+            << QWebEngineDownloadItem::MimeHtmlSaveFormat;
+
+    QString selectedFilter = filters[1];
+    QString fileName = QFileDialog::getSaveFileName(this,
+                                                    tr("Save Page"),
+                                                    lastPath,
+                                                    filters.join(";;"),
+                                                    &selectedFilter);
+    if (fileName.isEmpty()) {
+        return;
+    }
+
+    lastPath = QFileInfo(fileName).path();
+
+    QWebEngineDownloadItem::SavePageFormat format = formats.at(filters.indexOf(selectedFilter));
+
+    qDebug() << "save page as" << format << "to" << fileName;
+
+    emit statusMessage(tr("Saving page to %1").arg(fileName));
+
+    m_webViewer->page()->save(fileName, format);
+}
+
+VWordCountInfo VMdTab::fetchWordCountInfo(bool p_editMode) const
+{
+    if (p_editMode) {
+        if (m_editor) {
+            return m_editor->fetchWordCountInfo();
+        }
+    } else {
+        // Request to update with current text.
+        if (m_isEditMode) {
+            const_cast<VMdTab *>(this)->updateWebView();
+        }
+
+        return m_document->getWordCountInfo();
+    }
+
+    return VWordCountInfo();
+}
+
+void VMdTab::setCurrentMode(Mode p_mode)
+{
+    if (m_mode == p_mode) {
+        return;
+    }
+
+    qreal factor = m_webViewer->zoomFactor();
+    if (m_mode == Mode::Read) {
+        m_readWebViewState->m_zoomFactor = factor;
+    } else if (m_mode == Mode::EditPreview) {
+        m_previewWebViewState->m_zoomFactor = factor;
+        m_livePreviewHelper->setLivePreviewEnabled(false);
+    }
+
+    m_mode = p_mode;
+
+    switch (p_mode) {
+    case Mode::Read:
+        if (m_editor) {
+            m_editor->hide();
+        }
+
+        m_webViewer->setInPreview(false);
+        m_webViewer->show();
+
+        // Fix the bug introduced by 051088be31dbffa3c04e2d382af15beec40d5fdb
+        // which replace QStackedLayout with QSplitter.
+        QCoreApplication::sendPostedEvents();
+
+        if (m_readWebViewState.isNull()) {
+            m_readWebViewState.reset(new WebViewState());
+            m_readWebViewState->m_zoomFactor = factor;
+        } else if (factor != m_readWebViewState->m_zoomFactor) {
+            m_webViewer->setZoomFactor(m_readWebViewState->m_zoomFactor);
+        }
+
+        m_document->setPreviewEnabled(false);
+        break;
+
+    case Mode::Edit:
+        m_document->muteWebView(true);
+        m_webViewer->hide();
+        m_editor->show();
+
+        QCoreApplication::sendPostedEvents();
+
+        break;
+
+    case Mode::EditPreview:
+        Q_ASSERT(m_editor);
+        m_document->muteWebView(true);
+        m_webViewer->setInPreview(true);
+        m_webViewer->show();
+        m_editor->show();
+
+        QCoreApplication::sendPostedEvents();
+
+        if (m_previewWebViewState.isNull()) {
+            m_previewWebViewState.reset(new WebViewState());
+            m_previewWebViewState->m_zoomFactor = factor;
+
+            // Init the size of two splits.
+            QList<int> sizes = m_splitter->sizes();
+            Q_ASSERT(sizes.size() == 2);
+            int a = (sizes[0] + sizes[1]) / 2;
+            if (a <= 0) {
+                a = 1;
+            }
+
+            int b = (sizes[0] + sizes[1]) - a;
+
+            QList<int> newSizes;
+            newSizes.append(a);
+            newSizes.append(b);
+            m_splitter->setSizes(newSizes);
+        } else if (factor != m_previewWebViewState->m_zoomFactor) {
+            m_webViewer->setZoomFactor(m_previewWebViewState->m_zoomFactor);
+        }
+
+        m_document->setPreviewEnabled(true);
+        m_livePreviewHelper->setLivePreviewEnabled(true);
+        m_editor->getMarkdownHighlighter()->updateHighlight();
+        break;
+
+    default:
+        break;
+    }
+
+    focusChild();
+}
+
+void VMdTab::toggleLivePreview()
+{
+    switch (m_mode) {
+    case Mode::EditPreview:
+        setCurrentMode(Mode::Edit);
+        break;
+
+    case Mode::Edit:
+        setCurrentMode(Mode::EditPreview);
+        break;
+
+    default:
+        break;
+    }
 }

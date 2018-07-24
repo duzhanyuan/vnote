@@ -1,14 +1,15 @@
 body {
     margin: 0 auto;
-    font-family: Helvetica, sans-serif, Tahoma, Arial, Verdana, Geneva, Georgia, Palatino, "Times New Roman", "Hiragino Sans GB", "冬青黑体", "Microsoft YaHei", "微软雅黑", "Microsoft YaHei UI", "WenQuanYi Micro Hei", "文泉驿雅黑", Dengxian, "等线体", STXihei, "华文细黑", "Liberation Sans", "Droid Sans", NSimSun, "新宋体", SimSun, "宋体";
-    color: #363636;
-    line-height: 1;
+    font-family: Verdana, Helvetica, sans-serif, Tahoma, Arial, Geneva, Georgia, Palatino, "Times New Roman", "Hiragino Sans GB", "冬青黑体", "Microsoft YaHei", "微软雅黑", "Microsoft YaHei UI", "WenQuanYi Micro Hei", "文泉驿雅黑", Dengxian, "等线体", STXihei, "华文细黑", "Liberation Sans", "Droid Sans", NSimSun, "新宋体", SimSun, "宋体";
+    color: #222222;
+    line-height: 1.5;
     padding: 15px;
     background: #F5F5F5;
+    font-size: 16px;
 }
 
 h1, h2, h3, h4, h5, h6 {
-    color: #363636;
+    color: #222222;
     font-weight: bold;
     margin-top: 20px;
     margin-bottom: 10px;
@@ -17,18 +18,20 @@ h1, h2, h3, h4, h5, h6 {
 
 p {
     padding: 0;
+    margin-top: 16px;
+    margin-bottom: 16px;
 }
 
 h1 {
-    font-size: 36px;
-}
-
-h2 {
     font-size: 30px;
 }
 
-h3 {
+h2 {
     font-size: 26px;
+}
+
+h3 {
+    font-size: 24px;
 }
 
 h4 {
@@ -48,10 +51,12 @@ a {
     margin: 0;
     padding: 0;
     vertical-align: baseline;
+    text-decoration: none;
+    word-break: break-all;
 }
 
 a:hover {
-    text-decoration: none;
+    text-decoration: underline;
     color: #ff6600;
 }
 
@@ -68,8 +73,8 @@ li {
     line-height: 24px;
 }
 
-li ul, li ul {
-    margin-left: 24px;
+li ul, li ol {
+    margin-left: 16px;
 }
 
 p, ul, ol {
@@ -84,18 +89,25 @@ pre {
 }
 
 code {
-    font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New;
-    line-height: 1.5;
-    font-size: 14px;
+    font-family: Consolas, Monaco, Monospace, Courier;
     color: #8E24AA;
+    word-break: break-all;
 }
 
 pre code {
     display: block;
     overflow-x: auto;
     padding: 0.5em;
-    color: #363636;
+    color: #222222;
     background-color: #E0E0E0;
+    border-left: .5em solid #00897B;
+    line-height: 1.5;
+    font-family: Consolas, Monaco, Monospace, Courier;
+    white-space: pre;
+}
+
+pre code.markdown-metadata {
+    border-left: .5em solid #80CBC4;
 }
 
 aside {
@@ -106,9 +118,9 @@ aside {
 
 blockquote {
     color: #666;
-    border-left:.5em solid #7a7a7a;
-    padding: 0 2em;
-    margin-left:0;
+    border-left: .5em solid #7a7a7a;
+    padding: 0 1em;
+    margin-left: 0;
 }
 
 blockquote p {
@@ -162,19 +174,22 @@ table tr th :last-child, table tr td :last-child {
 }
 
 div.mermaid-diagram {
-    overflow-y: hidden;
-}
-
-pre.mermaid-diagram {
+    margin: 16px 0px 16px 0px;
     overflow-y: hidden;
 }
 
 div.flowchart-diagram {
-    overflow-y: hidden;
+    padding: 0px 5px 0px 5px;
+    margin: 16px 0px 16px 0px;
+    width: fit-content;
+    overflow: hidden;
 }
 
-pre.flowchart-diagram {
-    overflow-y: hidden;
+div.plantuml-diagram {
+    padding: 5px 5px 0px 5px;
+    margin: 16px 0px 16px 0px;
+    width: fit-content;
+    overflow: hidden;
 }
 
 .img-package {
@@ -199,6 +214,11 @@ div.img-caption {
     line-height: 1.5;
 }
 
+.emoji_zero,.emoji_one,.emoji_two,.emoji_three,.emoji_four,.emoji_five,.emoji_six,.emoji_seven,.emoji_eight,.emoji_nine {
+    margin-left: 5px;
+    margin-right: 8px;
+}
+
 /* For Highlight.js Line Number */
 table.hljs-ln tr {
     border: none;
@@ -211,22 +231,23 @@ table.hljs-ln tr td {
 }
 
 table.hljs-ln tr td.hljs-ln-numbers {
-	-webkit-touch-callout: none;
-	-webkit-user-select: none;
-	-khtml-user-select: none;
-	-moz-user-select: none;
-	-ms-user-select: none;
-	user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
 
-	text-align: center;
-	color: #AAA;
-	border-right: 1px solid #CCC;
-	vertical-align: top;
-	padding-right: 5px;
+    text-align: center;
+    color: #AAA;
+    border-right: 1px solid #CCC;
+    vertical-align: top;
+    padding-right: 5px;
+    white-space: nowrap;
 }
 
 table.hljs-ln tr td.hljs-ln-code {
-	padding-left: 10px;
+    padding-left: 10px;
 }
 
 ::-webkit-scrollbar {
@@ -296,4 +317,23 @@ table.hljs-ln tr td.hljs-ln-code {
     background-image: url(up.svg);
     background-repeat: no-repeat;
     background-size: contain;
+}
+
+::selection {
+  background: #1976D2;
+  color: #F5F5F5;
+}
+
+.modal-box {
+    background-color: rgb(234, 234, 234);
+    background-color: rgba(234, 234, 234, 0.95);
+}
+
+span.modal-close {
+    color: #666666;
+}
+
+span.modal-close:hover,
+span.modal-close:focus {
+    color: #222222;
 }

@@ -5,12 +5,16 @@
 #include "utils/vutils.h"
 
 VLineEdit::VLineEdit(QWidget *p_parent)
-    : QLineEdit(p_parent)
+    : QLineEdit(p_parent),
+      m_ctrlKEnabled(true),
+      m_ctrlEEnabled(true)
 {
 }
 
 VLineEdit::VLineEdit(const QString &p_contents, QWidget *p_parent)
-    : QLineEdit(p_contents, p_parent)
+    : QLineEdit(p_contents, p_parent),
+      m_ctrlKEnabled(true),
+      m_ctrlEEnabled(true)
 {
 }
 
@@ -58,6 +62,26 @@ void VLineEdit::keyPressEvent(QKeyEvent *p_event)
                 }
             }
 
+            accept = true;
+        }
+
+        break;
+    }
+
+    case Qt::Key_K:
+    {
+        if (VUtils::isControlModifierForVim(modifiers) && !m_ctrlKEnabled) {
+            QWidget::keyPressEvent(p_event);
+            accept = true;
+        }
+
+        break;
+    }
+
+    case Qt::Key_E:
+    {
+        if (VUtils::isControlModifierForVim(modifiers) && !m_ctrlEEnabled) {
+            QWidget::keyPressEvent(p_event);
             accept = true;
         }
 

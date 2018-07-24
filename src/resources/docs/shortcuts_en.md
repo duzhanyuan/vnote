@@ -9,6 +9,8 @@ Toggle expanding the edit area.
 Create a note in current folder.
 - `Ctrl+F`  
 Find/Replace in current note.
+- `Ctrl+Alt+F`  
+Advanced find.
 - `Ctrl+Q`  
 Quit VNote.
 - `Ctrl+J`/`Ctrl+K`  
@@ -19,10 +21,12 @@ Scroll in all directions.
 Recover last closed file.
 - `Ctrl+Alt+L`  
 Open Flash Page.
+- `Ctrl+T`  
+Edit current note or save changes and exit edit mode.
+- `Ctrl+G`  
+Activate Universal Entry.
 
 ### Read Mode
-- `Ctrl+W`  
-Edit current note.
 - `H`/`J`/`K`/`L`  
 Navigation, corresponding to Left/Down/Up/Right arrow keys.
 - `Ctrl+U`  
@@ -31,25 +35,38 @@ Scroll up half screen.
 Scroll down half screen.
 - `gg`/`G`  
 Jump to the beginning or end of the note. (Case Sensitive).
-- `Ctrl + +/-`    
+- `Ctrl + +/-`  
 Zoom in/out the page.
-- `Ctrl+Wheel`    
+- `Ctrl+Wheel`  
 Zoom in/out the page through the mouse scroll.
 - `Ctrl+0`  
 Recover the page zoom factor to 100%.
 - Jump between titles
-    - `[[`: jump to previous title;
-    - `]]`: jump to next title;
-    - `[]`: jump to previous title at the same level;
-    - `][`: jump to next title at the same level;
-    - `[{`: jump to previous title at a higher level;
-    - `]}`: jump to next title at a higher level;
+    - `<N>[[`: jump to previous `N` title;
+    - `<N>]]`: jump to next `N` title;
+    - `<N>[]`: jump to previous `N` title at the same level;
+    - `<N>][`: jump to next `N` title at the same level;
+    - `<N>[{`: jump to previous `N` title at a higher level;
+    - `<N>]}`: jump to next `N` title at a higher level;
+- `/` or `?` to search forward or backward
+    - `N`: find next match;
+    - `Shift+N`: find previous match;
+- `:` for Vim command
+    - `:q`: close current note;
+    - `:noh[lsearch]`: clear search highlights;
 
 ### Edit Mode
 - `Ctrl+S`  
 Save current changes.
-- `Ctrl+T`  
-Save current changes and exit edit mode.
+- `Ctrl + +/-`  
+Zoom in/out the page.
+- `Ctrl+Wheel`  
+Zoom in/out the page through the mouse scroll.
+- `Ctrl+0`  
+Recover the page zoom factor to 100%.
+- `Ctrl+J/K`  
+Scroll page down/up without changing cursor.
+
 
 #### Text Editing
 - `Ctrl+B`  
@@ -58,8 +75,8 @@ Insert bold. Press `Ctrl+B` again to exit. Current selected text will be changed
 Insert italic. Press `Ctrl+I` again to exit. Current selected text will be changed to italic if exists.
 - `Ctrl+D`  
 Insert strikethrought. Press `Ctrl+D` again to exit. Current selected text will be changed to strikethrough if exists.
-- `Ctrl+K`  
-Insert inline code. Press `Ctrl+K` again to exit. Current selected text will be changed to inline code if exists.
+- `Ctrl+;`  
+Insert inline code. Press `Ctrl+;` again to exit. Current selected text will be changed to inline code if exists.
 - `Ctrl+M`  
 Insert fenced code block. Press `Ctrl+M` again to exit. Current selected text will be wrapped into a code block if exists.
 - `Ctrl+L`  
@@ -91,8 +108,8 @@ Expand the selection to the beginning or end of current line.
 - `Ctrl+Shift+Home`, `Ctrl+Shift+End`  
 Expand the selection to the beginning or end of current note.
 
-## Custom Shortcuts
-VNote supports customing some standard shortcuts, though it is not recommended. VNote stores shortcuts' configuration information in the `[shortcuts]` and `[captain_mode_shortcuts]` sections of user configuration file `vnote.ini`.
+## Customize Shortcuts
+VNote supports customizing some standard shortcuts, though it is not recommended. VNote stores shortcuts' configuration information in the `[shortcuts]` and `[captain_mode_shortcuts]` sections of user configuration file `vnote.ini`.
 
 For example, the default configruation may look like this:
 
@@ -100,7 +117,7 @@ For example, the default configruation may look like this:
 [shortcuts]
 ; Define shortcuts here, with each item in the form "operation=keysequence".
 ; Leave keysequence empty to disable the shortcut of an operation.
-; Custom shortcuts may conflict with some key bindings in edit mode or Vim mode.
+; Customized shortcuts may conflict with some key bindings in edit mode or Vim mode.
 ; Ctrl+Q is reserved for quitting VNote.
 
 ; Leader key of Captain mode
@@ -109,10 +126,6 @@ CaptainMode=Ctrl+E
 NewNote=Ctrl+Alt+N
 ; Save current note
 SaveNote=Ctrl+S
-; Save changes and enter read mode
-SaveAndRead=Ctrl+T
-; Edit current note
-EditNote=Ctrl+W
 ; Close current note
 CloseNote=
 ; Open file/replace dialog
@@ -144,7 +157,7 @@ ToolsDock=T
 ; Close current note
 CloseNote=X
 ; Show shortcuts help document
-ShortcutsHelp=?
+ShortcutsHelp=Shift+?
 ; Flush the log file
 FlushLogFile=";"
 ; Show opened files list
@@ -190,10 +203,12 @@ Press the leader key `Ctrl+E`, then VNote will enter the Captain Mode, within wh
 
 - `E`   
 Toggle expanding the edit area.
-- `P`   
-Toggle single panel or two panels mode.
+- `Y`   
+Focus to the edit area.
 - `T`   
 Toggle the Tools panel.
+- `Shift+#`   
+Toggle the Tool Bar.
 - `F`   
 Popup the opened notes list of current split window. Within this list, pressing the sequence number in front of each note could jump to that note.
 - `A`   
@@ -201,9 +216,9 @@ Popup the attachments list of current note.
 - `X`   
 Close current tab.
 - `J`   
-Jump to next tab.
+Jump to the next tab.
 - `K`   
-Jump to last tab.
+Jump to the previous tab.
 - `1` - `9`  
 Number key 1 to 9 will jump to the tabs with corresponding sequence number.
 - `0`   
@@ -216,6 +231,10 @@ Discard current changes and exit edit mode.
 Vertically split current window.
 - `R`   
 Remove current split window.
+- `Shift+|`   
+Maximize current split window.
+- `=`   
+Distribute all the split windows evenly.
 - `H`   
 Jump to the first split window on the left.
 - `L`   
@@ -228,7 +247,13 @@ Move current tab one split window right.
 Evaluate current cursor word or selected text as magic words.
 - `S`  
 Apply a snippet in edit mode.
-- `?`   
+- `O`  
+Export notes.
+- `I`  
+Toggle live preview panel.
+- `C`  
+Toggle full-text search.
+- `Shift+?`   
 Display shortcuts documentation.
 
 ## Navigation Mode
@@ -252,7 +277,7 @@ VNote supports following features of Vim:
 - `zz`, `zb`, `zt`;
 - `u` and `Ctrl+R` for undo and redo;
 - Text objects `i/a`: word, WORD, `''`, `""`, `` ` ` ``, `()`, `[]`, `<>`, and `{}`;
-- Command line `:w`, `:wq`, `:x`, `:q`, `:q!`, and `:nohlsearch`;
+- Command line `:w`, `:wq`, `:x`, `:q`, `:q!`, and `:noh[lsearch]`;
 - Jump between titles
     - `[[`: jump to previous title;
     - `]]`: jump to next title;
@@ -269,3 +294,7 @@ VNote supports following features of Vim:
 For now, VNote does **NOT** support the macro and repeat(`.`) features of Vim.
 
 Enjoy Vim in VNote!
+
+# Others
+- `Ctrl+J` and `Ctrl+K` to navigate through items;
+- `Ctrl+N` and `Ctrl+P` to navigate through search results in list;

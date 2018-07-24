@@ -1,4 +1,100 @@
 # Changes History
+## v1.20
+- More efficient and accurate Markdown parser and highlighter;
+- MathJax: get rid of escaping;
+- Draw background for **hrule** in edit mode;
+- Support specifying the expanded level of outline;
+- Support drag&drop a directory to Explorer to open it;
+- `Ctrl+;` to insert inline code and `Ctrl+J/K` to scroll page in edit mode;
+- Support YAML front matter in edit mode;
+- Support searching Explorer root directory;
+
+## v1.19
+- Support tags for notes;
+- UniversalEntry: support searching tags;
+- WebView: click an image or diagram to view it in read mode;
+- Add test buttons for PlantUML and Graphviz in settings dialog;
+- CaptainMode: Y to focus to the edit area;
+
+## v1.18
+- Explorer: fix the crash when no root entry is set;
+- New dark theme **v_detorte** from a Vim *detorte* theme;
+- Support maximizing split or distributing splits;
+- Refine styles and HiDPI support;
+
+## v1.17
+- Add **History** to browse history;
+- Add **Explorer** to browse external files;
+- Support view order in note list;
+- Support relative path for notebook;
+- UniversalEntry
+    - Fix input method issue on macOS;
+    - Add `j` for listing and searching History;
+- Support customized zoom delta of editor;
+- Add cache for in-place preview;
+- Better support for hiDPI;
+- Lazy initialization;
+- Support stay-on-top;
+
+## v1.16
+- Markdown-it: supports specifying image size, emoji, and YAML metadata;
+- Bug fixes;
+
+## v1.15
+- Support **PlantUML** and **Graphviz**;
+- **In-Place Preview** for MathJax, PlantUML, Graphviz, and Flowchart.js;
+- **Live Preview** for diagrams via `Ctrl+E I`;
+- Restore cursor position when recovering pages at startup;
+- UniversalEntry
+    - Ctrl+I to expand/collapse current item;
+    - Ctrl+L to go to current item's parent item;
+- Markdown-it: aware of YAML format metadata in notes;
+- Show hovered link in status line in read mode;
+- Export: support embedding images as data URI into HTML pages;
+
+## v1.14
+- Support **Universal Entry** by `Ctrl+G`;
+- Single click a note in note list to open it in a new tab by default;
+- Translate `Ctrl` in default shortcuts to `Meta` on macOS;
+- Do not copy files when import if they locate in current folder;
+
+## v1.13
+- Replace **v_white** theme with **v_native**, which behaves more like native applications;
+- Support **full-text search**;
+    - Support `&&` and `||` logics (space-separated keywords are treated as AND);
+- Enhanced export;
+    - Support MHTML format;
+    - Support All-In-One PDF via tool *wkhtmltopdf*;
+    - Support *pandoc* and random tool for custom export;
+- Support **Word Count** information in both read and edit mode;
+- Support SavePage action in read mode;
+- Support *back reference* in replace text via `\1`, `\2`, and so on;
+- Support sorting in Cart;
+- Support sorting notes and folders via name or modification date;
+- Support both `flow` and `flowchart` as the language of *flowchart.js* diagram;
+- Add PasteAsBlockQuote menu action to paste text as block quote from clipboard;
+- Add options for Markdown-it to support subscript and superscript;
+- Better support for 4K display;
+
+## v1.12
+- Combine `EditNote` and `SaveExitNote` as `EditReadNote` (`Ctrl+T`);
+- Support exporting notes as Markdown, HTML, and PDF;
+- Support simple search in directory tree, file list, and outline;
+- Support copying selected text as HTML in edit mode;
+- Support copying text to Evernote, OneNote, Word, WeChat Public Account editor and so on;
+- Support auto-save;
+- Support fullscreen mode and hiding menu bar;
+- Support `Ctrl+H/W/U` to delete text in most line edits;
+- Support zooming in/out in edit mode;
+- Support MathJax in fenced code block with language `mathjax` specified;
+- More shortcuts;
+- Add **Cart** to collect notes for further processing;
+- Output built-in themes on start of VNote;
+- `Esc` to exit edit mode when Vim mode is disabled;
+- Support Vim command line for search in read mode;
+- Support printing;
+- Single click in file list to open file in current tab, double clicks to open in a new tab;
+
 ## v1.11.1
 - Refine copy function in read mode. Better support for copying and pasting into OneNote or WeChat editor;
 - Do not highlight code blocks without language specified by default;

@@ -51,11 +51,15 @@ typedef enum
     pmh_HTMLBLOCK,          /**< Block of HTML */
     pmh_HRULE,              /**< Horizontal rule */
     pmh_REFERENCE,          /**< Reference */
+    pmh_FENCEDCODEBLOCK,    /**< Fenced code block */
     pmh_NOTE,               /**< Note */
     pmh_STRIKE,             /**< Strike-through */
-    
+    pmh_FRONTMATTER,        /**< Front matter */
+    pmh_DISPLAYFORMULA,     /**< Math display formula */
+    pmh_INLINEEQUATION,     /**< Math inline equation */
+
     // Utility types used by the parser itself:
-    
+
     // List of pmh_RAW element lists, each to be processed separately from
     // others (for each element in linked lists of this type, `children` points
     // to a linked list of pmh_RAW elements):
@@ -84,7 +88,7 @@ typedef enum
 * \brief Number of types in pmh_element_type.
 * \sa pmh_element_type
 */
-#define pmh_NUM_TYPES 31
+#define pmh_NUM_TYPES 35
 
 /**
 * \brief Number of *language element* types in pmh_element_type.
@@ -118,8 +122,10 @@ enum pmh_extensions
     pmh_EXT_NONE    = 0,        /**< No extensions */
     pmh_EXT_NOTES   = (1 << 0), /**< Footnote syntax:
                                      http://pandoc.org/README.html#footnotes */
-    pmh_EXT_STRIKE  = (1 << 1)  /**< Strike-through syntax:
+    pmh_EXT_STRIKE  = (1 << 1), /**< Strike-through syntax:
                                      http://pandoc.org/README.html#strikeout */
+    pmh_EXT_FRONTMATTER  = (1 << 2),  /**< YAML meta data */
+    pmh_EXT_MATH         = (1 << 3),  /**< Math */
 };
 
 #endif

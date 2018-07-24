@@ -20,6 +20,7 @@
 #include "vexporter.h"
 #include "vmdtab.h"
 #include "vvimindicator.h"
+#include "vvimcmdlineedit.h"
 #include "vtabindicator.h"
 #include "dialog/vupdater.h"
 #include "vorphanfile.h"
@@ -35,14 +36,29 @@
 #include "vpalette.h"
 #include "utils/viconutils.h"
 #include "dialog/vtipsdialog.h"
-
-VMainWindow *g_mainWin;
+#include "vcart.h"
+#include "dialog/vexportdialog.h"
+#include "vsearcher.h"
+#include "vuniversalentry.h"
+#include "vsearchue.h"
+#include "voutlineue.h"
+#include "vhelpue.h"
+#include "vlistfolderue.h"
+#include "dialog/vfixnotebookdialog.h"
+#include "vhistorylist.h"
+#include "vexplorer.h"
+#include "vlistue.h"
+#include "vtagexplorer.h"
 
 extern VConfigManager *g_config;
 
 extern VPalette *g_palette;
 
+VMainWindow *g_mainWin;
+
 VNote *g_vnote;
+
+VWebUtils *g_webUtils;
 
 const int VMainWindow::c_sharedMemTimerInterval = 1000;
 
@@ -52,24 +68,34 @@ extern QFile g_logFile;
 
 #define COLOR_PIXMAP_ICON_SIZE 64
 
+enum NaviBoxIndex
+{
+    NotebookPanel = 0,
+    HistoryList,
+    Explorer,
+    TagExplorer
+};
+
 
 VMainWindow::VMainWindow(VSingleInstanceGuard *p_guard, QWidget *p_parent)
-    : QMainWindow(p_parent), m_guard(p_guard),
-      m_windowOldState(Qt::WindowNoState), m_requestQuit(false)
+    : QMainWindow(p_parent),
+      m_guard(p_guard),
+      m_windowOldState(Qt::WindowNoState),
+      m_requestQuit(false),
+      m_printer(NULL),
+      m_ue(NULL)
 {
     qsrand(QDateTime::currentDateTime().toTime_t());
 
     g_mainWin = this;
 
     setWindowIcon(QIcon(":/resources/icons/vnote.ico"));
+
     vnote = new VNote(this);
     g_vnote = vnote;
 
-    if (g_config->getEnableCompactMode()) {
-        m_panelViewState = PanelViewState::CompactMode;
-    } else {
-        m_panelViewState = PanelViewState::TwoPanels;
-    }
+    m_webUtils.init();
+    g_webUtils = &m_webUtils;
 
     initCaptain();
 
@@ -83,13 +109,11 @@ VMainWindow::VMainWindow(VSingleInstanceGuard *p_guard, QWidget *p_parent)
 
     initDockWindows();
 
-    changePanelView(m_panelViewState);
-
     restoreStateAndGeometry();
 
     setContextMenuPolicy(Qt::NoContextMenu);
 
-    notebookSelector->update();
+    m_notebookSelector->update();
 
     initSharedMemoryWatcher();
 
@@ -129,13 +153,23 @@ void VMainWindow::initCaptain()
 
 void VMainWindow::registerCaptainAndNavigationTargets()
 {
-    m_captain->registerNavigationTarget(notebookSelector);
-    m_captain->registerNavigationTarget(directoryTree);
+    m_captain->registerNavigationTarget(m_naviBox);
+    m_captain->registerNavigationTarget(m_notebookSelector);
+    m_captain->registerNavigationTarget(m_dirTree);
     m_captain->registerNavigationTarget(m_fileList);
-    m_captain->registerNavigationTarget(editArea);
+    m_captain->registerNavigationTarget(m_historyList);
+
+    m_tagExplorer->registerNavigationTarget();
+
+    m_captain->registerNavigationTarget(m_editArea);
+
+    m_tabIndicator->registerNavigationTarget();
+
     m_captain->registerNavigationTarget(m_toolBox);
     m_captain->registerNavigationTarget(outline);
     m_captain->registerNavigationTarget(m_snippetList);
+    m_captain->registerNavigationTarget(m_cart);
+    m_captain->registerNavigationTarget(m_searcher);
 
     // Register Captain mode targets.
     m_captain->registerCaptainTarget(tr("AttachmentList"),
@@ -150,18 +184,22 @@ void VMainWindow::registerCaptainAndNavigationTargets()
                                      g_config->getCaptainShortcutKeySequence("ExpandMode"),
                                      this,
                                      toggleExpandModeByCaptain);
-    m_captain->registerCaptainTarget(tr("OnePanelView"),
-                                     g_config->getCaptainShortcutKeySequence("OnePanelView"),
-                                     this,
-                                     toggleOnePanelViewByCaptain);
     m_captain->registerCaptainTarget(tr("DiscardAndRead"),
                                      g_config->getCaptainShortcutKeySequence("DiscardAndRead"),
                                      this,
                                      discardAndReadByCaptain);
+    m_captain->registerCaptainTarget(tr("ToolBar"),
+                                     g_config->getCaptainShortcutKeySequence("ToolBar"),
+                                     this,
+                                     toggleToolBarByCaptain);
     m_captain->registerCaptainTarget(tr("ToolsDock"),
                                      g_config->getCaptainShortcutKeySequence("ToolsDock"),
                                      this,
                                      toggleToolsDockByCaptain);
+    m_captain->registerCaptainTarget(tr("SearchDock"),
+                                     g_config->getCaptainShortcutKeySequence("SearchDock"),
+                                     this,
+                                     toggleSearchDockByCaptain);
     m_captain->registerCaptainTarget(tr("CloseNote"),
                                      g_config->getCaptainShortcutKeySequence("CloseNote"),
                                      this,
@@ -174,64 +212,68 @@ void VMainWindow::registerCaptainAndNavigationTargets()
                                      g_config->getCaptainShortcutKeySequence("FlushLogFile"),
                                      this,
                                      flushLogFileByCaptain);
+    m_captain->registerCaptainTarget(tr("Export"),
+                                     g_config->getCaptainShortcutKeySequence("Export"),
+                                     this,
+                                     exportByCaptain);
+    m_captain->registerCaptainTarget(tr("FocusEditArea"),
+                                     g_config->getCaptainShortcutKeySequence("FocusEditArea"),
+                                     this,
+                                     focusEditAreaByCaptain);
 }
 
 void VMainWindow::setupUI()
 {
-    QWidget *directoryPanel = setupDirectoryPanel();
+    setupNaviBox();
 
-    m_fileList = new VFileList();
-    m_fileList->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Expanding);
+    m_editArea = new VEditArea();
+    m_editArea->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_findReplaceDialog = m_editArea->getFindReplaceDialog();
+    m_fileList->setEditArea(m_editArea);
+    m_dirTree->setEditArea(m_editArea);
 
-    editArea = new VEditArea();
-    editArea->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_findReplaceDialog = editArea->getFindReplaceDialog();
-    m_fileList->setEditArea(editArea);
-    directoryTree->setEditArea(editArea);
+    connect(m_editArea, &VEditArea::fileClosed,
+            m_historyList, &VHistoryList::addFile);
 
     // Main Splitter
     m_mainSplitter = new QSplitter();
     m_mainSplitter->setObjectName("MainSplitter");
-    m_mainSplitter->addWidget(directoryPanel);
-    m_mainSplitter->addWidget(m_fileList);
-    setTabOrder(directoryTree, m_fileList->getContentWidget());
-    m_mainSplitter->addWidget(editArea);
+    m_mainSplitter->addWidget(m_naviBox);
+    m_mainSplitter->addWidget(m_editArea);
     m_mainSplitter->setStretchFactor(0, 0);
-    m_mainSplitter->setStretchFactor(1, 0);
-    m_mainSplitter->setStretchFactor(2, 1);
+    m_mainSplitter->setStretchFactor(1, 1);
 
-    // Signals
-    connect(directoryTree, &VDirectoryTree::currentDirectoryChanged,
-            m_fileList, &VFileList::setDirectory);
-    connect(directoryTree, &VDirectoryTree::directoryUpdated,
-            editArea, &VEditArea::handleDirectoryUpdated);
+    connect(m_dirTree, &VDirectoryTree::directoryUpdated,
+            m_editArea, &VEditArea::handleDirectoryUpdated);
 
-    connect(notebookSelector, &VNotebookSelector::notebookUpdated,
-            editArea, &VEditArea::handleNotebookUpdated);
-    connect(notebookSelector, &VNotebookSelector::notebookCreated,
-            directoryTree, [this](const QString &p_name, bool p_import) {
+    connect(m_notebookSelector, &VNotebookSelector::notebookUpdated,
+            m_editArea, &VEditArea::handleNotebookUpdated);
+    connect(m_notebookSelector, &VNotebookSelector::notebookCreated,
+            m_dirTree, [this](const QString &p_name, bool p_import) {
                 Q_UNUSED(p_name);
                 if (!p_import) {
-                    directoryTree->newRootDirectory();
+                    m_dirTree->newRootDirectory();
                 }
             });
 
     connect(m_fileList, &VFileList::fileClicked,
-            editArea, &VEditArea::openFile);
+            m_editArea, &VEditArea::openFile);
     connect(m_fileList, &VFileList::fileCreated,
-            editArea, &VEditArea::openFile);
+            m_editArea, &VEditArea::openFile);
     connect(m_fileList, &VFileList::fileUpdated,
-            editArea, &VEditArea::handleFileUpdated);
-    connect(editArea, &VEditArea::tabStatusUpdated,
+            m_editArea, &VEditArea::handleFileUpdated);
+    connect(m_editArea, &VEditArea::tabStatusUpdated,
             this, &VMainWindow::handleAreaTabStatusUpdated);
-    connect(editArea, &VEditArea::statusMessage,
+    connect(m_editArea, &VEditArea::statusMessage,
             this, &VMainWindow::showStatusMessage);
-    connect(editArea, &VEditArea::vimStatusUpdated,
+    connect(m_editArea, &VEditArea::vimStatusUpdated,
             this, &VMainWindow::handleVimStatusUpdated);
     connect(m_findReplaceDialog, &VFindReplaceDialog::findTextChanged,
             this, &VMainWindow::handleFindDialogTextChanged);
 
     setCentralWidget(m_mainSplitter);
+
+    initVimCmd();
 
     m_vimIndicator = new VVimIndicator(this);
     m_vimIndicator->hide();
@@ -240,77 +282,88 @@ void VMainWindow::setupUI()
     m_tabIndicator->hide();
 
     // Create and show the status bar
+    statusBar()->addPermanentWidget(m_vimCmd);
     statusBar()->addPermanentWidget(m_vimIndicator);
     statusBar()->addPermanentWidget(m_tabIndicator);
 
     initTrayIcon();
 }
 
-QWidget *VMainWindow::setupDirectoryPanel()
+void VMainWindow::setupNaviBox()
 {
-    // Notebook selector.
-    notebookLabel = new QLabel(tr("Notebooks"));
-    notebookLabel->setProperty("TitleLabel", true);
-    notebookLabel->setProperty("NotebookPanel", true);
+    m_naviBox = new VToolBox();
 
-    notebookSelector = new VNotebookSelector();
-    notebookSelector->setObjectName("NotebookSelector");
-    notebookSelector->setProperty("NotebookPanel", true);
-    notebookSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    setupNotebookPanel();
+    m_naviBox->addItem(m_nbSplitter,
+                       ":/resources/icons/notebook.svg",
+                       tr("Notebooks"),
+                       m_dirTree);
 
-    // Navigation panel.
-    directoryLabel = new QLabel(tr("Folders"));
+    m_historyList = new VHistoryList();
+    m_naviBox->addItem(m_historyList,
+                       ":/resources/icons/history.svg",
+                       tr("History"));
+
+    m_explorer = new VExplorer();
+    m_naviBox->addItem(m_explorer,
+                       ":/resources/icons/explorer.svg",
+                       tr("Explorer"));
+
+    m_tagExplorer = new VTagExplorer();
+    m_naviBox->addItem(m_tagExplorer,
+                       ":/resources/icons/tag_explorer.svg",
+                       tr("Tags"));
+    connect(m_notebookSelector, &VNotebookSelector::curNotebookChanged,
+            m_tagExplorer, &VTagExplorer::setNotebook);
+}
+
+void VMainWindow::setupNotebookPanel()
+{
+    m_notebookSelector = new VNotebookSelector();
+    m_notebookSelector->setObjectName("NotebookSelector");
+    m_notebookSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+
+    // Folders.
+    QLabel *directoryLabel = new QLabel(tr("Folders"));
     directoryLabel->setProperty("TitleLabel", true);
-    directoryLabel->setProperty("NotebookPanel", true);
 
-    directoryTree = new VDirectoryTree;
-    directoryTree->setProperty("NotebookPanel", true);
+    m_dirTree = new VDirectoryTree;
 
     QVBoxLayout *naviLayout = new QVBoxLayout;
+    naviLayout->addWidget(m_notebookSelector);
     naviLayout->addWidget(directoryLabel);
-    naviLayout->addWidget(directoryTree);
+    naviLayout->addWidget(m_dirTree);
     naviLayout->setContentsMargins(0, 0, 0, 0);
     naviLayout->setSpacing(0);
     QWidget *naviWidget = new QWidget();
     naviWidget->setLayout(naviLayout);
 
-    QWidget *tmpWidget = new QWidget();
+    // Notes.
+    m_fileList = new VFileList();
+    m_fileList->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Expanding);
 
-    // Compact splitter.
-    m_naviSplitter = new QSplitter();
-    m_naviSplitter->setOrientation(Qt::Vertical);
-    m_naviSplitter->setObjectName("NaviSplitter");
-    m_naviSplitter->addWidget(naviWidget);
-    m_naviSplitter->addWidget(tmpWidget);
-    m_naviSplitter->setStretchFactor(0, 0);
-    m_naviSplitter->setStretchFactor(1, 1);
+    m_nbSplitter = new QSplitter();
+    m_nbSplitter->setOrientation(Qt::Vertical);
+    m_nbSplitter->setObjectName("NotebookSplitter");
+    m_nbSplitter->addWidget(naviWidget);
+    m_nbSplitter->addWidget(m_fileList);
+    m_nbSplitter->setStretchFactor(0, 0);
+    m_nbSplitter->setStretchFactor(1, 1);
 
-    tmpWidget->hide();
-
-    QVBoxLayout *nbLayout = new QVBoxLayout;
-    nbLayout->addWidget(notebookLabel);
-    nbLayout->addWidget(notebookSelector);
-    nbLayout->addWidget(m_naviSplitter);
-    nbLayout->setContentsMargins(0, 0, 0, 0);
-    nbLayout->setSpacing(0);
-    QWidget *nbContainer = new QWidget();
-    nbContainer->setObjectName("NotebookPanel");
-    nbContainer->setLayout(nbLayout);
-    nbContainer->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Expanding);
-
-    connect(notebookSelector, &VNotebookSelector::curNotebookChanged,
+    connect(m_notebookSelector, &VNotebookSelector::curNotebookChanged,
             this, [this](VNotebook *p_notebook) {
-                directoryTree->setNotebook(p_notebook);
-                directoryTree->setFocus();
+                m_dirTree->setNotebook(p_notebook);
+                m_dirTree->setFocus();
             });
 
-    connect(notebookSelector, &VNotebookSelector::curNotebookChanged,
+    connect(m_notebookSelector, &VNotebookSelector::curNotebookChanged,
             this, &VMainWindow::handleCurrentNotebookChanged);
 
-    connect(directoryTree, &VDirectoryTree::currentDirectoryChanged,
+    connect(m_dirTree, &VDirectoryTree::currentDirectoryChanged,
             this, &VMainWindow::handleCurrentDirectoryChanged);
 
-    return nbContainer;
+    connect(m_dirTree, &VDirectoryTree::currentDirectoryChanged,
+            m_fileList, &VFileList::setDirectory);
 }
 
 void VMainWindow::initToolBar()
@@ -318,13 +371,15 @@ void VMainWindow::initToolBar()
     const int tbIconSize = g_config->getToolBarIconSize() * VUtils::calculateScaleFactor();
     QSize iconSize(tbIconSize, tbIconSize);
 
-    initFileToolBar(iconSize);
-    initViewToolBar(iconSize);
-    initEditToolBar(iconSize);
-    initNoteToolBar(iconSize);
+    m_toolBars.append(initFileToolBar(iconSize));
+    m_toolBars.append(initViewToolBar(iconSize));
+    m_toolBars.append(initEditToolBar(iconSize));
+    m_toolBars.append(initNoteToolBar(iconSize));
+
+    setToolBarVisible(g_config->getToolBarChecked());
 }
 
-void VMainWindow::initViewToolBar(QSize p_iconSize)
+QToolBar *VMainWindow::initViewToolBar(QSize p_iconSize)
 {
     QToolBar *viewToolBar = addToolBar(tr("View"));
     viewToolBar->setObjectName("ViewToolBar");
@@ -333,74 +388,72 @@ void VMainWindow::initViewToolBar(QSize p_iconSize)
         viewToolBar->setIconSize(p_iconSize);
     }
 
-    m_viewActGroup = new QActionGroup(this);
-    QAction *onePanelViewAct = new QAction(VIconUtils::menuIcon(":/resources/icons/one_panel.svg"),
-                                           tr("&Single Panel"),
-                                           m_viewActGroup);
-    onePanelViewAct->setStatusTip(tr("Display only the notes list panel"));
-    onePanelViewAct->setToolTip(tr("Single Panel"));
-    onePanelViewAct->setCheckable(true);
-    onePanelViewAct->setData((int)PanelViewState::SinglePanel);
+    QAction *fullScreenAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/fullscreen.svg"),
+                                         tr("Full Screen"),
+                                         this);
+    QString keySeq = g_config->getShortcutKeySequence("FullScreen");
+    QKeySequence seq(keySeq);
+    if (!seq.isEmpty()) {
+        fullScreenAct->setText(tr("Full Screen\t%1").arg(VUtils::getShortcutText(keySeq)));
+        fullScreenAct->setShortcut(seq);
+    }
 
-    QAction *twoPanelViewAct = new QAction(VIconUtils::menuIcon(":/resources/icons/two_panels.svg"),
-                                           tr("&Two Panels"),
-                                           m_viewActGroup);
-    twoPanelViewAct->setStatusTip(tr("Display both the folders and notes list panel"));
-    twoPanelViewAct->setToolTip(tr("Two Panels"));
-    twoPanelViewAct->setCheckable(true);
-    twoPanelViewAct->setData((int)PanelViewState::TwoPanels);
-
-    QAction *compactViewAct = new QAction(VIconUtils::menuIcon(":/resources/icons/compact_mode.svg"),
-                                           tr("&Compact Mode"),
-                                           m_viewActGroup);
-    compactViewAct->setStatusTip(tr("Integrate the folders and notes list panel in one column"));
-    compactViewAct->setCheckable(true);
-    compactViewAct->setData((int)PanelViewState::CompactMode);
-
-    connect(m_viewActGroup, &QActionGroup::triggered,
-            this, [this](QAction *p_action) {
-                if (!p_action) {
-                    return;
-                }
-
-                int act = p_action->data().toInt();
-                switch (act) {
-                case (int)PanelViewState::SinglePanel:
-                    onePanelView();
-                    break;
-
-                case (int)PanelViewState::TwoPanels:
-                    twoPanelView();
-                    break;
-
-                case (int)PanelViewState::CompactMode:
-                    compactModeView();
-                    break;
-
-                default:
-                    break;
+    fullScreenAct->setStatusTip(tr("Toggle full screen"));
+    connect(fullScreenAct, &QAction::triggered,
+            this, [this]() {
+                if (windowState() & Qt::WindowFullScreen) {
+                    if (m_windowOldState & Qt::WindowMaximized) {
+                        showMaximized();
+                    } else {
+                        showNormal();
+                    }
+                } else {
+                    showFullScreen();
                 }
             });
 
-    QMenu *panelMenu = new QMenu(this);
-    panelMenu->setToolTipsVisible(true);
-    panelMenu->addAction(onePanelViewAct);
-    panelMenu->addAction(twoPanelViewAct);
-    panelMenu->addAction(compactViewAct);
+    QAction *stayOnTopAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/stay_on_top.svg"),
+                                        tr("Stay On Top"),
+                                        this);
+    stayOnTopAct->setStatusTip(tr("Toggle stay-on-top"));
+    stayOnTopAct->setCheckable(true);
+    connect(stayOnTopAct, &QAction::triggered,
+            this, &VMainWindow::stayOnTop);
+
+    QAction *menuBarAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/menubar.svg"),
+                                      tr("Menu Bar"),
+                                      this);
+    menuBarAct->setStatusTip(tr("Toggle menu bar"));
+    menuBarAct->setCheckable(true);
+    menuBarAct->setChecked(g_config->getMenuBarChecked());
+    connect(menuBarAct, &QAction::triggered,
+            this, [this](bool p_checked) {
+                setMenuBarVisible(p_checked);
+                g_config->setMenuBarChecked(p_checked);
+            });
+
+    QMenu *viewMenu = new QMenu(this);
+    viewMenu->setToolTipsVisible(true);
+    viewMenu->addAction(fullScreenAct);
+    viewMenu->addAction(stayOnTopAct);
+    viewMenu->addAction(menuBarAct);
 
     expandViewAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/expand.svg"),
-                                tr("Expand"), this);
+                                tr("Expand"),
+                                this);
+    VUtils::fixTextWithCaptainShortcut(expandViewAct, "ExpandMode");
     expandViewAct->setStatusTip(tr("Expand the edit area"));
     expandViewAct->setCheckable(true);
-    expandViewAct->setMenu(panelMenu);
+    expandViewAct->setMenu(viewMenu);
     connect(expandViewAct, &QAction::triggered,
             this, [this](bool p_checked) {
-                // Recover m_panelViewState or change to expand mode.
                 changePanelView(p_checked ? PanelViewState::ExpandMode
-                                          : m_panelViewState);
+                                          : PanelViewState::VerticalMode);
             });
 
     viewToolBar->addAction(expandViewAct);
+
+    return viewToolBar;
 }
 
 // Enable/disable all actions of @p_widget.
@@ -413,7 +466,7 @@ static void setActionsEnabled(QWidget *p_widget, bool p_enabled)
     }
 }
 
-void VMainWindow::initEditToolBar(QSize p_iconSize)
+QToolBar *VMainWindow::initEditToolBar(QSize p_iconSize)
 {
     m_editToolBar = addToolBar(tr("Edit Toolbar"));
     m_editToolBar->setObjectName("EditToolBar");
@@ -482,7 +535,7 @@ void VMainWindow::initEditToolBar(QSize p_iconSize)
     m_editToolBar->addAction(strikethroughAct);
 
     QAction *inlineCodeAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/inline_code.svg"),
-                                         tr("Inline Code\t%1").arg(VUtils::getShortcutText("Ctrl+K")),
+                                         tr("Inline Code\t%1").arg(VUtils::getShortcutText("Ctrl+;")),
                                          this);
     inlineCodeAct->setStatusTip(tr("Insert inline-code text or change selected text to inline-coded"));
     connect(inlineCodeAct, &QAction::triggered,
@@ -535,14 +588,12 @@ void VMainWindow::initEditToolBar(QSize p_iconSize)
 
     m_editToolBar->addAction(insertImageAct);
 
-    QAction *toggleAct = m_editToolBar->toggleViewAction();
-    toggleAct->setToolTip(tr("Toggle the edit toolbar"));
-    viewMenu->addAction(toggleAct);
-
     setActionsEnabled(m_editToolBar, false);
+
+    return m_editToolBar;
 }
 
-void VMainWindow::initNoteToolBar(QSize p_iconSize)
+QToolBar *VMainWindow::initNoteToolBar(QSize p_iconSize)
 {
     QToolBar *noteToolBar = addToolBar(tr("Note Toolbar"));
     noteToolBar->setObjectName("NoteToolBar");
@@ -571,16 +622,37 @@ void VMainWindow::initNoteToolBar(QSize p_iconSize)
                                         this);
     flashPageAct->setStatusTip(tr("Open the Flash Page to edit"));
     QString keySeq = g_config->getShortcutKeySequence("FlashPage");
-    qDebug() << "set FlashPage shortcut to" << keySeq;
-    flashPageAct->setShortcut(QKeySequence(keySeq));
+    QKeySequence seq(keySeq);
+    if (!seq.isEmpty()) {
+        flashPageAct->setText(tr("Flash Page\t%1").arg(VUtils::getShortcutText(keySeq)));
+        flashPageAct->setShortcut(seq);
+    }
+
     connect(flashPageAct, &QAction::triggered,
             this, &VMainWindow::openFlashPage);
 
+    QAction *universalEntryAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/universal_entry_tb.svg"),
+                                             tr("Universal Entry"),
+                                             this);
+    universalEntryAct->setStatusTip(tr("Activate Universal Entry"));
+    keySeq = g_config->getShortcutKeySequence("UniversalEntry");
+    seq = QKeySequence(keySeq);
+    if (!seq.isEmpty()) {
+        universalEntryAct->setText(tr("Universal Entry\t%1").arg(VUtils::getShortcutText(keySeq)));
+        universalEntryAct->setShortcut(seq);
+    }
+
+    connect(universalEntryAct, &QAction::triggered,
+            this, &VMainWindow::activateUniversalEntry);
+
     noteToolBar->addWidget(m_attachmentBtn);
     noteToolBar->addAction(flashPageAct);
+    noteToolBar->addAction(universalEntryAct);
+
+    return noteToolBar;
 }
 
-void VMainWindow::initFileToolBar(QSize p_iconSize)
+QToolBar *VMainWindow::initFileToolBar(QSize p_iconSize)
 {
     QToolBar *fileToolBar = addToolBar(tr("Note"));
     fileToolBar->setObjectName("NoteToolBar");
@@ -592,91 +664,87 @@ void VMainWindow::initFileToolBar(QSize p_iconSize)
     m_avatarBtn = new QPushButton("VNote", this);
     m_avatarBtn->setProperty("AvatarBtn", true);
     m_avatarBtn->setFocusPolicy(Qt::NoFocus);
+    m_avatarBtn->setToolTip(tr("Log In (Not Implemented Yet)"));
 
     newRootDirAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/create_rootdir_tb.svg"),
-                                tr("New &Root Folder"),
+                                tr("New Root Folder"),
                                 this);
     newRootDirAct->setStatusTip(tr("Create a root folder in current notebook"));
     connect(newRootDirAct, &QAction::triggered,
-            directoryTree, &VDirectoryTree::newRootDirectory);
+            m_dirTree, &VDirectoryTree::newRootDirectory);
 
     newNoteAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/create_note_tb.svg"),
-                             tr("New &Note"), this);
+                             tr("New Note"), this);
     newNoteAct->setStatusTip(tr("Create a note in current folder"));
     QString keySeq = g_config->getShortcutKeySequence("NewNote");
-    qDebug() << "set NewNote shortcut to" << keySeq;
-    newNoteAct->setShortcut(QKeySequence(keySeq));
+    QKeySequence seq(keySeq);
+    if (!seq.isEmpty()) {
+        newNoteAct->setText(tr("New Note\t%1").arg(VUtils::getShortcutText(keySeq)));
+        newNoteAct->setShortcut(seq);
+    }
+
     connect(newNoteAct, &QAction::triggered,
             m_fileList, &VFileList::newFile);
 
     noteInfoAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/note_info_tb.svg"),
-                              tr("Note &Info"), this);
+                              tr("Note Info"), this);
     noteInfoAct->setStatusTip(tr("View and edit current note's information"));
     connect(noteInfoAct, &QAction::triggered,
             this, &VMainWindow::curEditFileInfo);
 
     deleteNoteAct = new QAction(VIconUtils::toolButtonDangerIcon(":/resources/icons/delete_note_tb.svg"),
-                                tr("&Delete Note"), this);
+                                tr("Delete Note"), this);
     deleteNoteAct->setStatusTip(tr("Delete current note"));
     connect(deleteNoteAct, &QAction::triggered,
             this, &VMainWindow::deleteCurNote);
 
-    editNoteAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/edit_note.svg"),
-                              tr("&Edit"), this);
-    editNoteAct->setStatusTip(tr("Edit current note"));
-    keySeq = g_config->getShortcutKeySequence("EditNote");
-    qDebug() << "set EditNote shortcut to" << keySeq;
-    editNoteAct->setShortcut(QKeySequence(keySeq));
-    connect(editNoteAct, &QAction::triggered,
-            editArea, &VEditArea::editFile);
+    m_editReadAct = new QAction(this);
+    connect(m_editReadAct, &QAction::triggered,
+            this, &VMainWindow::toggleEditReadMode);
 
-    discardExitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/discard_exit.svg"),
-                                 tr("Discard Changes And Read"), this);
-    discardExitAct->setStatusTip(tr("Discard changes and exit edit mode"));
-    discardExitAct->setToolTip(tr("Discard Changes And Read"));
-    connect(discardExitAct, &QAction::triggered,
-            editArea, &VEditArea::readFile);
+    m_discardExitAct = new QAction(VIconUtils::menuIcon(":/resources/icons/discard_exit.svg"),
+                                   tr("Discard Changes And Read"),
+                                   this);
+    VUtils::fixTextWithCaptainShortcut(m_discardExitAct, "DiscardAndRead");
+    m_discardExitAct->setStatusTip(tr("Discard changes and exit edit mode"));
+    connect(m_discardExitAct, &QAction::triggered,
+            this, [this]() {
+                m_editArea->readFile(true);
+            });
 
-    QMenu *exitEditMenu = new QMenu(this);
-    exitEditMenu->setToolTipsVisible(true);
-    exitEditMenu->addAction(discardExitAct);
-
-    saveExitAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/save_exit.svg"),
-                              tr("Save Changes And Read"), this);
-    saveExitAct->setStatusTip(tr("Save changes and exit edit mode"));
-    saveExitAct->setMenu(exitEditMenu);
-    keySeq = g_config->getShortcutKeySequence("SaveAndRead");
-    qDebug() << "set SaveAndRead shortcut to" << keySeq;
-    saveExitAct->setShortcut(QKeySequence(keySeq));
-    connect(saveExitAct, &QAction::triggered,
-            editArea, &VEditArea::saveAndReadFile);
+    updateEditReadAct(NULL);
 
     saveNoteAct = new QAction(VIconUtils::toolButtonIcon(":/resources/icons/save_note.svg"),
                               tr("Save"), this);
     saveNoteAct->setStatusTip(tr("Save changes to current note"));
     keySeq = g_config->getShortcutKeySequence("SaveNote");
-    qDebug() << "set SaveNote shortcut to" << keySeq;
-    saveNoteAct->setShortcut(QKeySequence(keySeq));
+    seq = QKeySequence(keySeq);
+    if (!seq.isEmpty()) {
+        saveNoteAct->setText(tr("Save\t%1").arg(VUtils::getShortcutText(keySeq)));
+        saveNoteAct->setShortcut(seq);
+    }
+
     connect(saveNoteAct, &QAction::triggered,
-            editArea, &VEditArea::saveFile);
+            m_editArea, &VEditArea::saveFile);
 
     newRootDirAct->setEnabled(false);
     newNoteAct->setEnabled(false);
     noteInfoAct->setEnabled(false);
     deleteNoteAct->setEnabled(false);
-    editNoteAct->setEnabled(false);
-    saveExitAct->setVisible(false);
-    discardExitAct->setVisible(false);
+    m_editReadAct->setEnabled(false);
+    m_discardExitAct->setEnabled(false);
     saveNoteAct->setEnabled(false);
 
     fileToolBar->addWidget(m_avatarBtn);
     fileToolBar->addAction(newRootDirAct);
     fileToolBar->addAction(newNoteAct);
-    fileToolBar->addAction(noteInfoAct);
     fileToolBar->addAction(deleteNoteAct);
-    fileToolBar->addAction(editNoteAct);
-    fileToolBar->addAction(saveExitAct);
+    fileToolBar->addAction(noteInfoAct);
+    fileToolBar->addAction(m_editReadAct);
+    fileToolBar->addAction(m_discardExitAct);
     fileToolBar->addAction(saveNoteAct);
+
+    return fileToolBar;
 }
 
 void VMainWindow::initMenuBar()
@@ -686,6 +754,8 @@ void VMainWindow::initMenuBar()
     initViewMenu();
     initMarkdownMenu();
     initHelpMenu();
+
+    setMenuBarVisible(g_config->getMenuBarChecked());
 }
 
 void VMainWindow::initHelpMenu()
@@ -705,6 +775,7 @@ void VMainWindow::initHelpMenu()
 
     QAction *shortcutAct = new QAction(tr("&Shortcuts Help"), this);
     shortcutAct->setToolTip(tr("View information about shortcut keys"));
+    VUtils::fixTextWithCaptainShortcut(shortcutAct, "ShortcutsHelp");
     connect(shortcutAct, &QAction::triggered,
             this, &VMainWindow::shortcutsHelp);
 
@@ -714,14 +785,22 @@ void VMainWindow::initHelpMenu()
             this, [this](){
                 QString docFile = VUtils::getDocFile(VNote::c_markdownGuideDocFile);
                 VFile *file = vnote->getOrphanFile(docFile, false, true);
-                editArea->openFile(file, OpenFileMode::Read);
+                m_editArea->openFile(file, OpenFileMode::Read);
             });
 
-    QAction *wikiAct = new QAction(tr("&Wiki"), this);
-    wikiAct->setToolTip(tr("View VNote's wiki on Github"));
-    connect(wikiAct, &QAction::triggered,
+    QAction *docAct = new QAction(tr("&Documentation"), this);
+    docAct->setToolTip(tr("View VNote's documentation"));
+    connect(docAct, &QAction::triggered,
             this, [this]() {
-                QString url("https://github.com/tamlok/vnote/wiki");
+                QString url("http://vnote.readthedocs.io");
+                QDesktopServices::openUrl(url);
+            });
+
+    QAction *donateAct = new QAction(tr("Do&nate"), this);
+    donateAct->setToolTip(tr("Donate to VNote or view the donate list"));
+    connect(donateAct, &QAction::triggered,
+            this, [this]() {
+                QString url("https://github.com/tamlok/vnote#donate");
                 QDesktopServices::openUrl(url);
             });
 
@@ -763,7 +842,8 @@ void VMainWindow::initHelpMenu()
 
     helpMenu->addAction(shortcutAct);
     helpMenu->addAction(mdGuideAct);
-    helpMenu->addAction(wikiAct);
+    helpMenu->addAction(docAct);
+    helpMenu->addAction(donateAct);
     helpMenu->addAction(updateAct);
     helpMenu->addAction(starAct);
     helpMenu->addAction(feedbackAct);
@@ -793,7 +873,7 @@ void VMainWindow::initMarkdownMenu()
 
     initCodeBlockStyleMenu(markdownMenu);
 
-    QAction *constrainImageAct = new QAction(tr("Constrain The Width of Images"), this);
+    QAction *constrainImageAct = new QAction(tr("Constrain The Width Of Images"), this);
     constrainImageAct->setToolTip(tr("Constrain the width of images to the window in read mode (re-open current tabs to make it work)"));
     constrainImageAct->setCheckable(true);
     connect(constrainImageAct, &QAction::triggered,
@@ -859,16 +939,16 @@ void VMainWindow::initMarkdownMenu()
     markdownMenu->addAction(lineNumberAct);
     lineNumberAct->setChecked(g_config->getEnableCodeBlockLineNumber());
 
-    QAction *previewImageAct = new QAction(tr("Preview Images In Edit Mode"), this);
-    previewImageAct->setToolTip(tr("Enable image preview in edit mode (re-open current tabs to make it work)"));
+    QAction *previewImageAct = new QAction(tr("In-Place Preview"), this);
+    previewImageAct->setToolTip(tr("Enable in-place preview (images, diagrams, and formulas) in edit mode (re-open current tabs to make it work)"));
     previewImageAct->setCheckable(true);
     connect(previewImageAct, &QAction::triggered,
             this, &VMainWindow::enableImagePreview);
     markdownMenu->addAction(previewImageAct);
     previewImageAct->setChecked(g_config->getEnablePreviewImages());
 
-    QAction *previewWidthAct = new QAction(tr("Constrain The Width Of Previewed Images"), this);
-    previewWidthAct->setToolTip(tr("Constrain the width of previewed images to the edit window in edit mode"));
+    QAction *previewWidthAct = new QAction(tr("Constrain The Width Of In-Place Preview"), this);
+    previewWidthAct->setToolTip(tr("Constrain the width of in-place preview to the edit window in edit mode"));
     previewWidthAct->setCheckable(true);
     connect(previewWidthAct, &QAction::triggered,
             this, &VMainWindow::enableImagePreviewConstraint);
@@ -878,8 +958,21 @@ void VMainWindow::initMarkdownMenu()
 
 void VMainWindow::initViewMenu()
 {
-    viewMenu = menuBar()->addMenu(tr("&View"));
-    viewMenu->setToolTipsVisible(true);
+    m_viewMenu = menuBar()->addMenu(tr("&View"));
+    m_viewMenu->setToolTipsVisible(true);
+
+    m_toolBarAct = new QAction(tr("Tool Bar"), this);
+    m_toolBarAct->setToolTip(tr("Toogle the tool bar"));
+    VUtils::fixTextWithCaptainShortcut(m_toolBarAct, "ToolBar");
+    m_toolBarAct->setCheckable(true);
+    m_toolBarAct->setChecked(g_config->getToolBarChecked());
+    connect(m_toolBarAct, &QAction::triggered,
+            this, [this] (bool p_checked) {
+                g_config->setToolBarChecked(p_checked);
+                setToolBarVisible(p_checked);
+            });
+
+    m_viewMenu->addAction(m_toolBarAct);
 }
 
 void VMainWindow::initFileMenu()
@@ -904,7 +997,11 @@ void VMainWindow::initFileMenu()
                 // Update lastPath
                 lastPath = QFileInfo(files[0]).path();
 
-                openFiles(VUtils::filterFilePathsToOpen(files));
+                openFiles(VUtils::filterFilePathsToOpen(files),
+                          false,
+                          g_config->getNoteOpenMode(),
+                          false,
+                          false);
             });
 
     fileMenu->addAction(openAct);
@@ -912,7 +1009,8 @@ void VMainWindow::initFileMenu()
     // Import notes from files.
     m_importNoteAct = newAction(VIconUtils::menuIcon(":/resources/icons/import_note.svg"),
                                 tr("&New Notes From Files"), this);
-    m_importNoteAct->setToolTip(tr("Create notes from external files in current folder by copy"));
+    m_importNoteAct->setToolTip(tr("Create notes from external files in current folder "
+                                   "(will copy files if they do not locate in current folder)"));
     connect(m_importNoteAct, &QAction::triggered,
             this, &VMainWindow::importNoteFromFile);
     m_importNoteAct->setEnabled(false);
@@ -922,15 +1020,13 @@ void VMainWindow::initFileMenu()
     fileMenu->addSeparator();
 
     // Export as PDF.
-    m_exportAsPDFAct = new QAction(tr("Export As &PDF"), this);
-    m_exportAsPDFAct->setToolTip(tr("Export current note as PDF file"));
-    connect(m_exportAsPDFAct, &QAction::triggered,
-            this, &VMainWindow::exportAsPDF);
-    m_exportAsPDFAct->setEnabled(false);
+    m_exportAct = new QAction(tr("E&xport"), this);
+    m_exportAct->setToolTip(tr("Export notes"));
+    VUtils::fixTextWithCaptainShortcut(m_exportAct, "Export");
+    connect(m_exportAct, &QAction::triggered,
+            this, &VMainWindow::handleExportAct);
 
-    fileMenu->addAction(m_exportAsPDFAct);
-
-    fileMenu->addSeparator();
+    fileMenu->addAction(m_exportAct);
 
     // Print.
     m_printAct = new QAction(VIconUtils::menuIcon(":/resources/icons/print.svg"),
@@ -939,6 +1035,10 @@ void VMainWindow::initFileMenu()
     connect(m_printAct, &QAction::triggered,
             this, &VMainWindow::printNote);
     m_printAct->setEnabled(false);
+
+    fileMenu->addAction(m_printAct);
+
+    fileMenu->addSeparator();
 
     // Themes.
     initThemeMenu(fileMenu);
@@ -963,8 +1063,8 @@ void VMainWindow::initFileMenu()
 
     fileMenu->addAction(openConfigAct);
 
-    QAction *customShortcutAct = new QAction(tr("Custom Shortcuts"), this);
-    customShortcutAct->setToolTip(tr("Custom some standard shortcuts"));
+    QAction *customShortcutAct = new QAction(tr("Customize Shortcuts"), this);
+    customShortcutAct->setToolTip(tr("Customize some standard shortcuts"));
     connect(customShortcutAct, &QAction::triggered,
             this, &VMainWindow::customShortcut);
 
@@ -1003,6 +1103,17 @@ void VMainWindow::initEditMenu()
     m_findReplaceAct->setShortcut(QKeySequence(keySeq));
     connect(m_findReplaceAct, &QAction::triggered,
             this, &VMainWindow::openFindDialog);
+
+    QAction *advFindAct = new QAction(tr("Advanced Find"), this);
+    advFindAct->setToolTip(tr("Advanced find within VNote"));
+    keySeq = g_config->getShortcutKeySequence("AdvancedFind");
+    qDebug() << "set AdvancedFind shortcut to" << keySeq;
+    advFindAct->setShortcut(QKeySequence(keySeq));
+    connect(advFindAct, &QAction::triggered,
+            this, [this]() {
+                m_searchDock->setVisible(true);
+                m_searcher->focusToSearch();
+            });
 
     m_findNextAct = new QAction(tr("Find Next"), this);
     m_findNextAct->setToolTip(tr("Find next occurence"));
@@ -1110,7 +1221,7 @@ void VMainWindow::initEditMenu()
             this, &VMainWindow::changeHighlightSelectedWord);
 
     // Highlight trailing space.
-    QAction *trailingSapceAct = new QAction(tr("Highlight Trailing Sapces"), this);
+    QAction *trailingSapceAct = new QAction(tr("Highlight Trailing Spaces"), this);
     trailingSapceAct->setToolTip(tr("Highlight all the spaces at the end of a line"));
     trailingSapceAct->setCheckable(true);
     connect(trailingSapceAct, &QAction::triggered,
@@ -1119,6 +1230,8 @@ void VMainWindow::initEditMenu()
     QMenu *findReplaceMenu = editMenu->addMenu(tr("Find/Replace"));
     findReplaceMenu->setToolTipsVisible(true);
     findReplaceMenu->addAction(m_findReplaceAct);
+    findReplaceMenu->addAction(advFindAct);
+    findReplaceMenu->addSeparator();
     findReplaceMenu->addAction(m_findNextAct);
     findReplaceMenu->addAction(m_findPreviousAct);
     findReplaceMenu->addAction(m_replaceAct);
@@ -1199,21 +1312,37 @@ void VMainWindow::initEditMenu()
 
 void VMainWindow::initDockWindows()
 {
-    toolDock = new QDockWidget(tr("Tools"), this);
-    toolDock->setObjectName("ToolsDock");
-    toolDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::West);
+    setTabPosition(Qt::RightDockWidgetArea, QTabWidget::East);
+    setTabPosition(Qt::TopDockWidgetArea, QTabWidget::North);
+    setTabPosition(Qt::BottomDockWidgetArea, QTabWidget::North);
+
+    setDockNestingEnabled(true);
+
+    initToolsDock();
+    initSearchDock();
+}
+
+void VMainWindow::initToolsDock()
+{
+    m_toolDock = new QDockWidget(tr("Tools"), this);
+    m_toolDock->setObjectName("ToolsDock");
+    m_toolDock->setAllowedAreas(Qt::AllDockWidgetAreas);
 
     // Outline tree.
     outline = new VOutline(this);
-    connect(editArea, &VEditArea::outlineChanged,
+    connect(m_editArea, &VEditArea::outlineChanged,
             outline, &VOutline::updateOutline);
-    connect(editArea, &VEditArea::currentHeaderChanged,
+    connect(m_editArea, &VEditArea::currentHeaderChanged,
             outline, &VOutline::updateCurrentHeader);
     connect(outline, &VOutline::outlineItemActivated,
-            editArea, &VEditArea::scrollToHeader);
+            m_editArea, &VEditArea::scrollToHeader);
 
     // Snippets.
     m_snippetList = new VSnippetList(this);
+
+    // Cart.
+    m_cart = new VCart(this);
 
     m_toolBox = new VToolBox(this);
     m_toolBox->addItem(outline,
@@ -1222,13 +1351,37 @@ void VMainWindow::initDockWindows()
     m_toolBox->addItem(m_snippetList,
                        ":/resources/icons/snippets.svg",
                        tr("Snippets"));
+    m_toolBox->addItem(m_cart,
+                       ":/resources/icons/cart.svg",
+                       tr("Cart"));
 
-    toolDock->setWidget(m_toolBox);
-    addDockWidget(Qt::RightDockWidgetArea, toolDock);
+    m_toolDock->setWidget(m_toolBox);
+    addDockWidget(Qt::RightDockWidgetArea, m_toolDock);
 
-    QAction *toggleAct = toolDock->toggleViewAction();
+    QAction *toggleAct = m_toolDock->toggleViewAction();
     toggleAct->setToolTip(tr("Toggle the tools dock widget"));
-    viewMenu->addAction(toggleAct);
+    VUtils::fixTextWithCaptainShortcut(toggleAct, "ToolsDock");
+
+    m_viewMenu->addAction(toggleAct);
+}
+
+void VMainWindow::initSearchDock()
+{
+    m_searchDock = new QDockWidget(tr("Search"), this);
+    m_searchDock->setObjectName("SearchDock");
+    m_searchDock->setAllowedAreas(Qt::AllDockWidgetAreas);
+
+    m_searcher = new VSearcher(this);
+
+    m_searchDock->setWidget(m_searcher);
+
+    addDockWidget(Qt::RightDockWidgetArea, m_searchDock);
+
+    QAction *toggleAct = m_searchDock->toggleViewAction();
+    toggleAct->setToolTip(tr("Toggle the search dock widget"));
+    VUtils::fixTextWithCaptainShortcut(toggleAct, "SearchDock");
+
+    m_viewMenu->addAction(toggleAct);
 }
 
 void VMainWindow::importNoteFromFile()
@@ -1269,8 +1422,6 @@ void VMainWindow::changeMarkdownConverter(QAction *action)
 
     MarkdownConverterType type = (MarkdownConverterType)action->data().toInt();
 
-    qDebug() << "switch to converter" << type;
-
     g_config->setMarkdownConverterType(type);
 }
 
@@ -1278,7 +1429,7 @@ void VMainWindow::aboutMessage()
 {
     QString info = tr("<span style=\"font-weight: bold;\">v%1</span>").arg(VConfigManager::c_version);
     info += "<br/><br/>";
-    info += tr("VNote is a Vim-inspired note-taking application for Markdown.");
+    info += tr("VNote is a free Vim-inspired note-taking application that knows programmers and Markdown better.");
     info += "<br/>";
     info += tr("Please visit <a href=\"https://github.com/tamlok/vnote.git\">Github</a> for more information.");
     QMessageBox::about(this, tr("About VNote"), info);
@@ -1338,7 +1489,7 @@ void VMainWindow::setEditorBackgroundColor(QAction *action)
 
 void VMainWindow::initConverterMenu(QMenu *p_menu)
 {
-    QMenu *converterMenu = p_menu->addMenu(tr("&Converter"));
+    QMenu *converterMenu = p_menu->addMenu(tr("&Renderer"));
     converterMenu->setToolTipsVisible(true);
 
     QActionGroup *converterAct = new QActionGroup(this);
@@ -1397,7 +1548,7 @@ void VMainWindow::initMarkdownitOptionMenu(QMenu *p_menu)
     QMenu *optMenu = p_menu->addMenu(tr("Markdown-it Options"));
     optMenu->setToolTipsVisible(true);
 
-    MarkdownitOption opt = g_config->getMarkdownitOption();
+    const MarkdownitOption &opt = g_config->getMarkdownitOption();
 
     QAction *htmlAct = new QAction(tr("HTML"), this);
     htmlAct->setToolTip(tr("Enable HTML tags in source"));
@@ -1432,9 +1583,57 @@ void VMainWindow::initMarkdownitOptionMenu(QMenu *p_menu)
                 g_config->setMarkdownitOption(opt);
             });
 
+    QAction *supAct = new QAction(tr("Superscript"), this);
+    supAct->setToolTip(tr("Enable superscript via ^^"));
+    supAct->setCheckable(true);
+    supAct->setChecked(opt.m_sup);
+    connect(supAct, &QAction::triggered,
+            this, [this](bool p_checked) {
+                MarkdownitOption opt = g_config->getMarkdownitOption();
+                opt.m_sup = p_checked;
+                g_config->setMarkdownitOption(opt);
+            });
+
+    QAction *subAct = new QAction(tr("Subscript"), this);
+    subAct->setToolTip(tr("Enable subscript via ~~"));
+    subAct->setCheckable(true);
+    subAct->setChecked(opt.m_sub);
+    connect(subAct, &QAction::triggered,
+            this, [this](bool p_checked) {
+                MarkdownitOption opt = g_config->getMarkdownitOption();
+                opt.m_sub = p_checked;
+                g_config->setMarkdownitOption(opt);
+            });
+
+    QAction *metadataAct = new QAction(tr("Metadata Aware"), this);
+    metadataAct->setToolTip(tr("Be aware of metadata in YAML format"));
+    metadataAct->setCheckable(true);
+    metadataAct->setChecked(opt.m_metadata);
+    connect(metadataAct, &QAction::triggered,
+            this, [this](bool p_checked) {
+                MarkdownitOption opt = g_config->getMarkdownitOption();
+                opt.m_metadata = p_checked;
+                g_config->setMarkdownitOption(opt);
+            });
+
+    QAction *emojiAct = new QAction(tr("Emoji"), this);
+    emojiAct->setToolTip(tr("Enable emoji and emoticon"));
+    emojiAct->setCheckable(true);
+    emojiAct->setChecked(opt.m_emoji);
+    connect(emojiAct, &QAction::triggered,
+            this, [this](bool p_checked) {
+                MarkdownitOption opt = g_config->getMarkdownitOption();
+                opt.m_emoji = p_checked;
+                g_config->setMarkdownitOption(opt);
+            });
+
     optMenu->addAction(htmlAct);
     optMenu->addAction(breaksAct);
     optMenu->addAction(linkifyAct);
+    optMenu->addAction(supAct);
+    optMenu->addAction(subAct);
+    optMenu->addAction(metadataAct);
+    optMenu->addAction(emojiAct);
 }
 
 void VMainWindow::initRenderBackgroundMenu(QMenu *menu)
@@ -1453,6 +1652,17 @@ void VMainWindow::initRenderBackgroundMenu(QMenu *menu)
     if (curBgColor == "System") {
         tmpAct->setChecked(true);
     }
+
+    renderBgMenu->addAction(tmpAct);
+
+    tmpAct = new QAction(tr("Transparent"), renderBackgroundAct);
+    tmpAct->setToolTip(tr("Use a transparent background for Markdown rendering"));
+    tmpAct->setCheckable(true);
+    tmpAct->setData("Transparent");
+    if (curBgColor == "Transparent") {
+        tmpAct->setChecked(true);
+    }
+
     renderBgMenu->addAction(tmpAct);
 
     const QVector<VColor> &bgColors = g_config->getCustomColors();
@@ -1735,6 +1945,7 @@ void VMainWindow::setRenderBackgroundColor(QAction *action)
     if (!action) {
         return;
     }
+
     g_config->setCurRenderBackgroundColor(action->data().toString());
     vnote->updateTemplate();
 }
@@ -1748,12 +1959,9 @@ void VMainWindow::updateActionsStateFromTab(const VEditTab *p_tab)
                       && dynamic_cast<const VOrphanFile *>(file)->isSystemFile();
 
     m_printAct->setEnabled(file && file->getDocType() == DocType::Markdown);
-    m_exportAsPDFAct->setEnabled(file && file->getDocType() == DocType::Markdown);
 
-    discardExitAct->setVisible(file && editMode);
-    saveExitAct->setVisible(file && editMode);
-    editNoteAct->setEnabled(file && !editMode);
-    editNoteAct->setVisible(!saveExitAct->isVisible());
+    updateEditReadAct(p_tab);
+
     saveNoteAct->setEnabled(file && editMode && file->isModifiable());
     deleteNoteAct->setEnabled(file && file->getType() == FileType::Note);
     noteInfoAct->setEnabled(file && !systemFile);
@@ -1765,9 +1973,14 @@ void VMainWindow::updateActionsStateFromTab(const VEditTab *p_tab)
     setActionsEnabled(m_editToolBar, file && editMode);
 
     // Handle heading sequence act independently.
-    m_headingSequenceAct->setEnabled(isHeadingSequenceApplicable());
+    m_headingSequenceAct->setEnabled(editMode
+                                     && file->isModifiable()
+                                     && isHeadingSequenceApplicable());
     const VMdTab *mdTab = dynamic_cast<const VMdTab *>(p_tab);
-    m_headingSequenceAct->setChecked(mdTab && mdTab->isHeadingSequenceEnabled());
+    m_headingSequenceAct->setChecked(mdTab
+                                     && editMode
+                                     && file->isModifiable()
+                                     && mdTab->isHeadingSequenceEnabled());
 
     // Find/Replace
     m_findReplaceAct->setEnabled(file);
@@ -1784,7 +1997,25 @@ void VMainWindow::updateActionsStateFromTab(const VEditTab *p_tab)
 
 void VMainWindow::handleAreaTabStatusUpdated(const VEditTabInfo &p_info)
 {
-    m_curTab = p_info.m_editTab;
+    if (m_curTab != p_info.m_editTab) {
+        if (m_curTab) {
+            if (m_vimCmd->isVisible()) {
+                m_curTab->handleVimCmdCommandCancelled();
+            }
+
+            // Disconnect the trigger signal from edit tab.
+            disconnect((VEditTab *)m_curTab, 0, m_vimCmd, 0);
+        }
+
+        m_curTab = p_info.m_editTab;
+        if (m_curTab) {
+            connect((VEditTab *)m_curTab, &VEditTab::triggerVimCmd,
+                    m_vimCmd, &VVimCmdLineEdit::reset);
+        }
+
+        m_vimCmd->hide();
+    }
+
     if (m_curTab) {
         m_curFile = m_curTab->getFile();
     } else {
@@ -1823,123 +2054,25 @@ void VMainWindow::handleAreaTabStatusUpdated(const VEditTabInfo &p_info)
     updateStatusInfo(p_info);
 }
 
-void VMainWindow::onePanelView()
-{
-    m_panelViewState = PanelViewState::SinglePanel;
-    g_config->setEnableCompactMode(false);
-    changePanelView(m_panelViewState);
-}
-
-void VMainWindow::twoPanelView()
-{
-    m_panelViewState = PanelViewState::TwoPanels;
-    g_config->setEnableCompactMode(false);
-    changePanelView(m_panelViewState);
-}
-
-void VMainWindow::compactModeView()
-{
-    m_panelViewState = PanelViewState::CompactMode;
-    g_config->setEnableCompactMode(true);
-    changePanelView(m_panelViewState);
-}
-
-void VMainWindow::enableCompactMode(bool p_enabled)
-{
-    const int fileListIdx = 1;
-    bool isCompactMode = m_naviSplitter->indexOf(m_fileList) != -1;
-    if (p_enabled) {
-        // Change to compact mode.
-        if (isCompactMode) {
-            return;
-        }
-
-        // Take m_fileList out of m_mainSplitter.
-        QWidget *tmpWidget = new QWidget(this);
-        Q_ASSERT(fileListIdx == m_mainSplitter->indexOf(m_fileList));
-        m_fileList->hide();
-        m_mainSplitter->replaceWidget(fileListIdx, tmpWidget);
-        tmpWidget->hide();
-
-        // Insert m_fileList into m_naviSplitter.
-        QWidget *wid = m_naviSplitter->replaceWidget(fileListIdx, m_fileList);
-        delete wid;
-
-        m_fileList->show();
-    } else {
-        // Disable compact mode and go back to two panels view.
-        if (!isCompactMode) {
-            return;
-        }
-
-        // Take m_fileList out of m_naviSplitter.
-        Q_ASSERT(fileListIdx == m_naviSplitter->indexOf(m_fileList));
-        QWidget *tmpWidget = new QWidget(this);
-        m_fileList->hide();
-        m_naviSplitter->replaceWidget(fileListIdx, tmpWidget);
-        tmpWidget->hide();
-
-        // Insert m_fileList into m_mainSplitter.
-        QWidget *wid = m_mainSplitter->replaceWidget(fileListIdx, m_fileList);
-        delete wid;
-
-        m_fileList->show();
-    }
-
-    // Set Tab order.
-    setTabOrder(directoryTree, m_fileList->getContentWidget());
-}
-
 void VMainWindow::changePanelView(PanelViewState p_state)
 {
     switch (p_state) {
     case PanelViewState::ExpandMode:
         m_mainSplitter->widget(0)->hide();
-        m_mainSplitter->widget(1)->hide();
-        m_mainSplitter->widget(2)->show();
-        break;
-
-    case PanelViewState::SinglePanel:
-        enableCompactMode(false);
-
-        m_mainSplitter->widget(0)->hide();
         m_mainSplitter->widget(1)->show();
-        m_mainSplitter->widget(2)->show();
         break;
 
-    case PanelViewState::TwoPanels:
-        enableCompactMode(false);
-
+    case PanelViewState::HorizontalMode:
+    case PanelViewState::VerticalMode:
         m_mainSplitter->widget(0)->show();
         m_mainSplitter->widget(1)->show();
-        m_mainSplitter->widget(2)->show();
-        break;
-
-    case PanelViewState::CompactMode:
-        m_mainSplitter->widget(0)->show();
-        m_mainSplitter->widget(1)->hide();
-        m_mainSplitter->widget(2)->show();
-
-        enableCompactMode(true);
         break;
 
     default:
         break;
     }
 
-    // Change the action state.
-    QList<QAction *> acts = m_viewActGroup->actions();
-    for (auto & act : acts) {
-        if (act->data().toInt() == (int)p_state) {
-            act->setChecked(true);
-        } else {
-            act->setChecked(false);
-        }
-    }
-
-    if (p_state != PanelViewState::ExpandMode) {
-        expandViewAct->setChecked(false);
-    }
+    expandViewAct->setChecked(p_state == PanelViewState::ExpandMode);
 }
 
 void VMainWindow::updateWindowTitle(const QString &str)
@@ -2019,7 +2152,7 @@ void VMainWindow::closeEvent(QCloseEvent *event)
         QVector<VFileSessionInfo> fileInfos;
         QVector<VEditTabInfo> tabs;
         if (saveOpenedNotes) {
-            tabs = editArea->getAllTabsInfo();
+            tabs = m_editArea->getAllTabsInfo();
 
             fileInfos.reserve(tabs.size());
 
@@ -2032,13 +2165,17 @@ void VMainWindow::closeEvent(QCloseEvent *event)
                 }
 
                 VFileSessionInfo info = VFileSessionInfo::fromEditTabInfo(&tab);
+                if (tab.m_editTab == m_curTab) {
+                    info.setActive(true);
+                }
+
                 fileInfos.push_back(info);
 
                 qDebug() << "file session:" << info.m_file << (info.m_mode == OpenFileMode::Edit);
             }
         }
 
-        if (!editArea->closeAllFiles(false)) {
+        if (!m_editArea->closeAllFiles(false)) {
             // Fail to close all the opened files, cancel closing app.
             event->ignore();
             return;
@@ -2049,6 +2186,7 @@ void VMainWindow::closeEvent(QCloseEvent *event)
         }
 
         QMainWindow::closeEvent(event);
+        qApp->quit();
     } else {
         hide();
         event->ignore();
@@ -2059,40 +2197,40 @@ void VMainWindow::saveStateAndGeometry()
 {
     g_config->setMainWindowGeometry(saveGeometry());
     g_config->setMainWindowState(saveState());
-    g_config->setToolsDockChecked(toolDock->isVisible());
-
-    if (m_panelViewState == PanelViewState::CompactMode) {
-        g_config->setNaviSplitterState(m_naviSplitter->saveState());
-        g_config->setMainSplitterState(m_mainSplitter->saveState());
-    } else {
-        // In one panel view, it will save the wrong state that the directory tree
-        // panel has a width of zero.
-        changePanelView(PanelViewState::TwoPanels);
-        g_config->setMainSplitterState(m_mainSplitter->saveState());
-    }
+    g_config->setToolsDockChecked(m_toolDock->isVisible());
+    g_config->setSearchDockChecked(m_searchDock->isVisible());
+    g_config->setNotebookSplitterState(m_nbSplitter->saveState());
+    g_config->setMainSplitterState(m_mainSplitter->saveState());
+    m_tagExplorer->saveStateAndGeometry();
+    g_config->setNaviBoxCurrentIndex(m_naviBox->currentIndex());
 }
 
 void VMainWindow::restoreStateAndGeometry()
 {
-    const QByteArray &geometry = g_config->getMainWindowGeometry();
+    const QByteArray geometry = g_config->getMainWindowGeometry();
     if (!geometry.isEmpty()) {
         restoreGeometry(geometry);
     }
-    const QByteArray &state = g_config->getMainWindowState();
+
+    const QByteArray state = g_config->getMainWindowState();
     if (!state.isEmpty()) {
         restoreState(state);
     }
-    toolDock->setVisible(g_config->getToolsDockChecked());
 
-    const QByteArray &splitterState = g_config->getMainSplitterState();
+    m_toolDock->setVisible(g_config->getToolsDockChecked());
+    m_searchDock->setVisible(g_config->getSearchDockChecked());
+
+    const QByteArray splitterState = g_config->getMainSplitterState();
     if (!splitterState.isEmpty()) {
         m_mainSplitter->restoreState(splitterState);
     }
 
-    const QByteArray &naviSplitterState = g_config->getNaviSplitterState();
-    if (!naviSplitterState.isEmpty()) {
-        m_naviSplitter->restoreState(naviSplitterState);
+    const QByteArray nbSplitterState = g_config->getNotebookSplitterState();
+    if (!nbSplitterState.isEmpty()) {
+        m_nbSplitter->restoreState(nbSplitterState);
     }
+
+    m_naviBox->setCurrentIndex(g_config->getNaviBoxCurrentIndex());
 }
 
 void VMainWindow::handleCurrentDirectoryChanged(const VDirectory *p_dir)
@@ -2129,13 +2267,13 @@ bool VMainWindow::locateFile(VFile *p_file)
 
     VNoteFile *file = dynamic_cast<VNoteFile *>(p_file);
     VNotebook *notebook = file->getNotebook();
-    if (notebookSelector->locateNotebook(notebook)) {
-        while (directoryTree->currentNotebook() != notebook) {
+    if (m_notebookSelector->locateNotebook(notebook)) {
+        while (m_dirTree->currentNotebook() != notebook) {
             QCoreApplication::sendPostedEvents();
         }
 
         VDirectory *dir = file->getDirectory();
-        if (directoryTree->locateDirectory(dir)) {
+        if (m_dirTree->locateDirectory(dir)) {
             while (m_fileList->currentDirectory() != dir) {
                 QCoreApplication::sendPostedEvents();
             }
@@ -2148,10 +2286,55 @@ bool VMainWindow::locateFile(VFile *p_file)
     }
 
     // Open the directory and file panels after location.
-    if (m_panelViewState == PanelViewState::CompactMode) {
-        compactModeView();
-    } else {
-        twoPanelView();
+    if (ret) {
+        showNotebookPanel();
+    }
+
+    return ret;
+}
+
+bool VMainWindow::locateDirectory(VDirectory *p_directory)
+{
+    bool ret = false;
+    if (!p_directory) {
+        return ret;
+    }
+
+    VNotebook *notebook = p_directory->getNotebook();
+    if (m_notebookSelector->locateNotebook(notebook)) {
+        while (m_dirTree->currentNotebook() != notebook) {
+            QCoreApplication::sendPostedEvents();
+        }
+
+        if (m_dirTree->locateDirectory(p_directory)) {
+            ret = true;
+            m_dirTree->setFocus();
+        }
+    }
+
+    // Open the directory and file panels after location.
+    if (ret) {
+        showNotebookPanel();
+    }
+
+    return ret;
+}
+
+bool VMainWindow::locateNotebook(VNotebook *p_notebook)
+{
+    bool ret = false;
+    if (!p_notebook) {
+        return ret;
+    }
+
+    if (m_notebookSelector->locateNotebook(p_notebook)) {
+        ret = true;
+        m_dirTree->setFocus();
+    }
+
+    // Open the directory and file panels after location.
+    if (ret) {
+        showNotebookPanel();
     }
 
     return ret;
@@ -2172,7 +2355,7 @@ void VMainWindow::handleFindDialogTextChanged(const QString &p_text, uint /* p_o
 
 void VMainWindow::openFindDialog()
 {
-    m_findReplaceDialog->openDialog(editArea->getSelectedText());
+    m_findReplaceDialog->openDialog(m_editArea->getSelectedText());
 }
 
 void VMainWindow::viewSettings()
@@ -2184,7 +2367,7 @@ void VMainWindow::viewSettings()
 void VMainWindow::closeCurrentFile()
 {
     if (m_curFile) {
-        editArea->closeFile(m_curFile, false);
+        m_editArea->closeFile(m_curFile, false);
     }
 }
 
@@ -2246,43 +2429,41 @@ void VMainWindow::shortcutsHelp()
 {
     QString docFile = VUtils::getDocFile(VNote::c_shortcutsDocFile);
     VFile *file = vnote->getOrphanFile(docFile, false, true);
-    editArea->openFile(file, OpenFileMode::Read);
+    m_editArea->openFile(file, OpenFileMode::Read);
 }
 
 void VMainWindow::printNote()
 {
-    QPrinter printer;
-    QPrintDialog dialog(&printer, this);
+    if (m_printer
+        || !m_curFile
+        || m_curFile->getDocType() != DocType::Markdown) {
+        return;
+    }
+
+    m_printer = new QPrinter();
+    QPrintDialog dialog(m_printer, this);
     dialog.setWindowTitle(tr("Print Note"));
 
     V_ASSERT(m_curTab);
 
-    if (m_curFile->getDocType() == DocType::Markdown) {
-        VMdTab *mdTab = dynamic_cast<VMdTab *>((VEditTab *)m_curTab);
-        VWebView *webView = mdTab->getWebViewer();
+    VMdTab *mdTab = dynamic_cast<VMdTab *>((VEditTab *)m_curTab);
+    VWebView *webView = mdTab->getWebViewer();
 
-        V_ASSERT(webView);
+    V_ASSERT(webView);
 
-        if (webView->hasSelection()) {
-            dialog.addEnabledOption(QAbstractPrintDialog::PrintSelection);
-        }
-
-        if (dialog.exec() != QDialog::Accepted) {
-            return;
-        }
+    if (webView->hasSelection()) {
+        dialog.addEnabledOption(QAbstractPrintDialog::PrintSelection);
     }
-}
 
-void VMainWindow::exportAsPDF()
-{
-    V_ASSERT(m_curTab);
-    V_ASSERT(m_curFile);
-
-    if (m_curFile->getDocType() == DocType::Markdown) {
-        VMdTab *mdTab = dynamic_cast<VMdTab *>((VEditTab *)m_curTab);
-        VExporter exporter(mdTab->getMarkdownConverterType(), this);
-        exporter.exportNote(m_curFile, ExportType::PDF);
-        exporter.exec();
+    if (dialog.exec() == QDialog::Accepted) {
+        webView->page()->print(m_printer, [this](bool p_succ) {
+                    qDebug() << "print web page callback" << p_succ;
+                    delete m_printer;
+                    m_printer = NULL;
+                });
+    } else {
+        delete m_printer;
+        m_printer = NULL;
     }
 }
 
@@ -2300,7 +2481,7 @@ QAction *VMainWindow::newAction(const QIcon &p_icon,
 
 void VMainWindow::showStatusMessage(const QString &p_msg)
 {
-    const int timeout = 3000;
+    const int timeout = 5000;
     statusBar()->showMessage(p_msg, timeout);
 }
 
@@ -2325,7 +2506,7 @@ void VMainWindow::updateStatusInfo(const VEditTabInfo &p_info)
 
 void VMainWindow::handleVimStatusUpdated(const VVim *p_vim)
 {
-    m_vimIndicator->update(p_vim, m_curTab);
+    m_vimIndicator->update(p_vim);
     if (!p_vim || !m_curTab || !m_curTab->isEditMode()) {
         m_vimIndicator->hide();
     } else {
@@ -2343,7 +2524,7 @@ bool VMainWindow::tryOpenInternalFile(const QString &p_filePath)
         VFile *file = vnote->getInternalFile(p_filePath);
 
         if (file) {
-            editArea->openFile(file, OpenFileMode::Read);
+            m_editArea->openFile(file, OpenFileMode::Read);
             return true;
         }
     }
@@ -2351,12 +2532,21 @@ bool VMainWindow::tryOpenInternalFile(const QString &p_filePath)
     return false;
 }
 
-void VMainWindow::openFiles(const QStringList &p_files,
-                            bool p_forceOrphan,
-                            OpenFileMode p_mode,
-                            bool p_forceMode)
+QVector<VFile *> VMainWindow::openFiles(const QStringList &p_files,
+                                        bool p_forceOrphan,
+                                        OpenFileMode p_mode,
+                                        bool p_forceMode,
+                                        bool p_oneByOne)
 {
+    QVector<VFile *> vfiles;
+    vfiles.reserve(p_files.size());
+
     for (int i = 0; i < p_files.size(); ++i) {
+        if (!QFileInfo::exists(p_files[i])) {
+            qWarning() << "file" << p_files[i] << "does not exist";
+            continue;
+        }
+
         VFile *file = NULL;
         if (!p_forceOrphan) {
             file = vnote->getInternalFile(p_files[i]);
@@ -2366,8 +2556,15 @@ void VMainWindow::openFiles(const QStringList &p_files,
             file = vnote->getOrphanFile(p_files[i], true);
         }
 
-        editArea->openFile(file, p_mode, p_forceMode);
+        m_editArea->openFile(file, p_mode, p_forceMode);
+        vfiles.append(file);
+
+        if (p_oneByOne) {
+            QCoreApplication::sendPostedEvents();
+        }
     }
+
+    return vfiles;
 }
 
 void VMainWindow::editOrphanFileInfo(VFile *p_file)
@@ -2387,7 +2584,7 @@ void VMainWindow::checkSharedMemory()
     QStringList files = m_guard->fetchFilesToOpen();
     if (!files.isEmpty()) {
         qDebug() << "shared memory fetch files" << files;
-        openFiles(files);
+        openFiles(files, false, g_config->getNoteOpenMode(), false, false);
 
         // Eliminate the signal.
         m_guard->fetchAskedToShow();
@@ -2461,7 +2658,7 @@ void VMainWindow::openStartupPages()
     {
         QVector<VFileSessionInfo> files = g_config->getLastOpenedFiles();
         qDebug() << "open" << files.size() << "last opened files";
-        editArea->openFiles(files);
+        m_editArea->openFiles(files, true);
         break;
     }
 
@@ -2469,7 +2666,7 @@ void VMainWindow::openStartupPages()
     {
         QStringList pagesToOpen = VUtils::filterFilePathsToOpen(g_config->getStartupPages());
         qDebug() << "open startup pages" << pagesToOpen;
-        openFiles(pagesToOpen);
+        openFiles(pagesToOpen, false, g_config->getNoteOpenMode(), false, true);
         break;
     }
 
@@ -2500,7 +2697,20 @@ bool VMainWindow::showAttachmentListByCaptain(void *p_target, void *p_data)
     Q_UNUSED(p_data);
     VMainWindow *obj = static_cast<VMainWindow *>(p_target);
     if (obj->m_attachmentBtn->isEnabled()) {
+        // Show tool bar first.
+        bool toolBarChecked = obj->m_toolBarAct->isChecked();
+        if (!toolBarChecked) {
+            obj->setToolBarVisible(true);
+
+            // Make it visible first.
+            QCoreApplication::sendPostedEvents();
+        }
+
         obj->m_attachmentBtn->showPopupWidget();
+
+        if (!toolBarChecked) {
+            obj->setToolBarVisible(false);
+        }
     }
 
     return true;
@@ -2527,25 +2737,12 @@ bool VMainWindow::toggleExpandModeByCaptain(void *p_target, void *p_data)
     return true;
 }
 
-bool VMainWindow::toggleOnePanelViewByCaptain(void *p_target, void *p_data)
-{
-    Q_UNUSED(p_data);
-    VMainWindow *obj = static_cast<VMainWindow *>(p_target);
-    if (obj->m_panelViewState == PanelViewState::TwoPanels) {
-        obj->onePanelView();
-    } else {
-        obj->twoPanelView();
-    }
-
-    return true;
-}
-
 bool VMainWindow::discardAndReadByCaptain(void *p_target, void *p_data)
 {
     Q_UNUSED(p_data);
     VMainWindow *obj = static_cast<VMainWindow *>(p_target);
     if (obj->m_curTab) {
-        obj->discardExitAct->trigger();
+        obj->m_discardExitAct->trigger();
         obj->m_curTab->setFocus();
 
         return false;
@@ -2554,11 +2751,33 @@ bool VMainWindow::discardAndReadByCaptain(void *p_target, void *p_data)
     return true;
 }
 
+bool VMainWindow::toggleToolBarByCaptain(void *p_target, void *p_data)
+{
+    Q_UNUSED(p_data);
+    VMainWindow *obj = static_cast<VMainWindow *>(p_target);
+    obj->m_toolBarAct->trigger();
+    return true;
+}
+
 bool VMainWindow::toggleToolsDockByCaptain(void *p_target, void *p_data)
 {
     Q_UNUSED(p_data);
     VMainWindow *obj = static_cast<VMainWindow *>(p_target);
-    obj->toolDock->setVisible(!obj->toolDock->isVisible());
+    obj->m_toolDock->setVisible(!obj->m_toolDock->isVisible());
+    return true;
+}
+
+bool VMainWindow::toggleSearchDockByCaptain(void *p_target, void *p_data)
+{
+    Q_UNUSED(p_data);
+    VMainWindow *obj = static_cast<VMainWindow *>(p_target);
+    bool visible = obj->m_searchDock->isVisible();
+    obj->m_searchDock->setVisible(!visible);
+    if (!visible) {
+        obj->m_searcher->focusToSearch();
+        return false;
+    }
+
     return true;
 }
 
@@ -2568,7 +2787,7 @@ bool VMainWindow::closeFileByCaptain(void *p_target, void *p_data)
     VMainWindow *obj = static_cast<VMainWindow *>(p_target);
     obj->closeCurrentFile();
 
-    QWidget *nextFocus = obj->editArea->getCurrentTab();
+    QWidget *nextFocus = obj->m_editArea->getCurrentTab();
     if (nextFocus) {
         nextFocus->setFocus();
     } else {
@@ -2599,10 +2818,29 @@ bool VMainWindow::flushLogFileByCaptain(void *p_target, void *p_data)
     return true;
 }
 
+bool VMainWindow::exportByCaptain(void *p_target, void *p_data)
+{
+    Q_UNUSED(p_data);
+
+    VMainWindow *obj = static_cast<VMainWindow *>(p_target);
+    QTimer::singleShot(50, obj, SLOT(handleExportAct()));
+
+    return true;
+}
+
+bool VMainWindow::focusEditAreaByCaptain(void *p_target, void *p_data)
+{
+    Q_UNUSED(p_data);
+
+    VMainWindow *obj = static_cast<VMainWindow *>(p_target);
+    obj->focusEditArea();
+    return false;
+}
+
 void VMainWindow::promptNewNotebookIfEmpty()
 {
     if (vnote->getNotebooks().isEmpty()) {
-        notebookSelector->newNotebook();
+        m_notebookSelector->newNotebook();
     }
 }
 
@@ -2762,7 +3000,7 @@ void VMainWindow::initThemeMenu(QMenu *p_menu)
 void VMainWindow::customShortcut()
 {
     VTipsDialog dialog(VUtils::getDocFile("tips_custom_shortcut.md"),
-                       tr("Custom Shortcuts"),
+                       tr("Customize Shortcuts"),
                        []() {
 #if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
                            // On macOS, it seems that we could not open that ini file directly.
@@ -2774,4 +3012,324 @@ void VMainWindow::customShortcut()
                        },
                        this);
     dialog.exec();
+}
+
+void VMainWindow::initVimCmd()
+{
+    m_vimCmd = new VVimCmdLineEdit(this);
+    m_vimCmd->setProperty("VimCommandLine", true);
+
+    connect(m_vimCmd, &VVimCmdLineEdit::commandCancelled,
+            this, [this]() {
+                if (m_curTab) {
+                    m_curTab->focusTab();
+                }
+
+                // NOTICE: should not hide before setting focus to edit tab.
+                m_vimCmd->hide();
+
+                if (m_curTab) {
+                    m_curTab->handleVimCmdCommandCancelled();
+                }
+            });
+
+    connect(m_vimCmd, &VVimCmdLineEdit::commandFinished,
+            this, [this](VVim::CommandLineType p_type, const QString &p_cmd) {
+                if (m_curTab) {
+                    m_curTab->focusTab();
+                }
+
+                m_vimCmd->hide();
+
+                // Hide the cmd line edit before execute the command.
+                // If we execute the command first, we will get Chinese input
+                // method enabled after returning to read mode.
+                if (m_curTab) {
+                    m_curTab->handleVimCmdCommandFinished(p_type, p_cmd);
+                }
+            });
+
+    connect(m_vimCmd, &VVimCmdLineEdit::commandChanged,
+            this, [this](VVim::CommandLineType p_type, const QString &p_cmd) {
+                if (m_curTab) {
+                    m_curTab->handleVimCmdCommandChanged(p_type, p_cmd);
+                }
+            });
+
+    connect(m_vimCmd, &VVimCmdLineEdit::requestNextCommand,
+            this, [this](VVim::CommandLineType p_type, const QString &p_cmd) {
+                if (m_curTab) {
+                    QString cmd = m_curTab->handleVimCmdRequestNextCommand(p_type, p_cmd);
+                    if (!cmd.isNull()) {
+                        m_vimCmd->setCommand(cmd);
+                    } else {
+                        m_vimCmd->restoreUserLastInput();
+                    }
+                }
+            });
+
+    connect(m_vimCmd, &VVimCmdLineEdit::requestPreviousCommand,
+            this, [this](VVim::CommandLineType p_type, const QString &p_cmd) {
+                if (m_curTab) {
+                    QString cmd = m_curTab->handleVimCmdRequestPreviousCommand(p_type, p_cmd);
+                    if (!cmd.isNull()) {
+                        m_vimCmd->setCommand(cmd);
+                    }
+                }
+            });
+
+    connect(m_vimCmd, &VVimCmdLineEdit::requestRegister,
+            this, [this](int p_key, int p_modifiers){
+                if (m_curTab) {
+                    QString val = m_curTab->handleVimCmdRequestRegister(p_key, p_modifiers);
+                    if (!val.isEmpty()) {
+                        m_vimCmd->setText(m_vimCmd->text() + val);
+                    }
+                }
+            });
+
+    m_vimCmd->hide();
+}
+
+void VMainWindow::toggleEditReadMode()
+{
+    if (!m_curTab) {
+        return;
+    }
+
+    if (m_curTab->isEditMode()) {
+        // Save changes and read.
+        m_editArea->saveAndReadFile();
+    } else {
+        // Edit.
+        m_editArea->editFile();
+    }
+}
+
+void VMainWindow::updateEditReadAct(const VEditTab *p_tab)
+{
+    static QIcon editIcon = VIconUtils::toolButtonIcon(":/resources/icons/edit_note.svg");
+    static QString editText;
+    static QIcon readIcon = VIconUtils::toolButtonIcon(":/resources/icons/save_exit.svg");
+    static QString readText;
+
+    if (editText.isEmpty()) {
+        QString keySeq = g_config->getShortcutKeySequence("EditReadNote");
+        QKeySequence seq(keySeq);
+        if (!seq.isEmpty()) {
+            QString shortcutText = VUtils::getShortcutText(keySeq);
+            editText = tr("Edit\t%1").arg(shortcutText);
+            readText = tr("Save Changes And Read\t%1").arg(shortcutText);
+
+            m_editReadAct->setShortcut(seq);
+        } else {
+            editText = tr("Edit");
+            readText = tr("Save Changes And Read");
+        }
+    }
+
+    if (!p_tab || !p_tab->isEditMode()) {
+        // Edit.
+        m_editReadAct->setIcon(editIcon);
+        m_editReadAct->setText(editText);
+        m_editReadAct->setStatusTip(tr("Edit current note"));
+
+        m_discardExitAct->setEnabled(false);
+    } else {
+        // Read.
+        m_editReadAct->setIcon(readIcon);
+        m_editReadAct->setText(readText);
+        m_editReadAct->setStatusTip(tr("Save changes and exit edit mode"));
+
+        m_discardExitAct->setEnabled(true);
+    }
+
+    m_editReadAct->setEnabled(p_tab);
+}
+
+void VMainWindow::handleExportAct()
+{
+    VExportDialog dialog(m_notebookSelector->currentNotebook(),
+                         m_dirTree->currentDirectory(),
+                         m_curFile,
+                         m_cart,
+                         g_config->getMdConverterType(),
+                         this);
+    dialog.exec();
+}
+
+VNotebook *VMainWindow::getCurrentNotebook() const
+{
+    return m_notebookSelector->currentNotebook();
+}
+
+void VMainWindow::activateUniversalEntry()
+{
+    if (!m_ue) {
+        initUniversalEntry();
+    }
+
+    m_captain->setCaptainModeEnabled(false);
+
+    // Move it to the top left corner of edit area.
+    QPoint topLeft = m_editArea->mapToGlobal(QPoint(0, 0));
+    QRect eaRect = m_editArea->editAreaRect();
+    topLeft += eaRect.topLeft();
+
+    // Use global position.
+    m_ue->move(topLeft);
+
+    eaRect.moveTop(0);
+    m_ue->setAvailableRect(eaRect);
+
+    m_ue->show();
+    m_ue->raise();
+}
+
+void VMainWindow::initUniversalEntry()
+{
+    m_ue = new VUniversalEntry(this);
+    m_ue->hide();
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    // Qt::Popup on macOS does not work well with input method.
+    m_ue->setWindowFlags(Qt::Tool
+                         | Qt::NoDropShadowWindowHint);
+    m_ue->setWindowModality(Qt::ApplicationModal);
+#else
+    m_ue->setWindowFlags(Qt::Popup
+                         | Qt::FramelessWindowHint
+                         | Qt::NoDropShadowWindowHint);
+#endif
+
+    connect(m_ue, &VUniversalEntry::exited,
+            this, [this]() {
+                m_captain->setCaptainModeEnabled(true);
+            });
+
+    // Register entries.
+    VSearchUE *searchUE = new VSearchUE(this);
+    m_ue->registerEntry('q', searchUE, VSearchUE::Name_FolderNote_AllNotebook);
+    m_ue->registerEntry('a', searchUE, VSearchUE::Content_Note_AllNotebook);
+    m_ue->registerEntry('z', searchUE, VSearchUE::Tag_Note_AllNotebook);
+    m_ue->registerEntry('w', searchUE, VSearchUE::Name_Notebook_AllNotebook);
+    m_ue->registerEntry('e', searchUE, VSearchUE::Name_FolderNote_CurrentNotebook);
+    m_ue->registerEntry('d', searchUE, VSearchUE::Content_Note_CurrentNotebook);
+    m_ue->registerEntry('c', searchUE, VSearchUE::Tag_Note_CurrentNotebook);
+    m_ue->registerEntry('r', searchUE, VSearchUE::Name_FolderNote_CurrentFolder);
+    m_ue->registerEntry('f', searchUE, VSearchUE::Content_Note_CurrentFolder);
+    m_ue->registerEntry('v', searchUE, VSearchUE::Tag_Note_CurrentFolder);
+    m_ue->registerEntry('t', searchUE, VSearchUE::Name_Note_Buffer);
+    m_ue->registerEntry('g', searchUE, VSearchUE::Content_Note_Buffer);
+    m_ue->registerEntry('b', searchUE, VSearchUE::Outline_Note_Buffer);
+    m_ue->registerEntry('u', searchUE, VSearchUE::Content_Note_ExplorerDirectory);
+    m_ue->registerEntry('y', new VOutlineUE(this), 0);
+    m_ue->registerEntry('h', searchUE, VSearchUE::Path_FolderNote_AllNotebook);
+    m_ue->registerEntry('n', searchUE, VSearchUE::Path_FolderNote_CurrentNotebook);
+    m_ue->registerEntry('m', new VListFolderUE(this), 0);
+    m_ue->registerEntry('j', new VListUE(this), VListUE::History);
+    m_ue->registerEntry('?', new VHelpUE(this), 0);
+}
+
+void VMainWindow::checkNotebooks()
+{
+    bool updated = false;
+    QVector<VNotebook *> &notebooks = g_vnote->getNotebooks();
+    for (int i = 0; i < notebooks.size(); ++i) {
+        VNotebook *nb = notebooks[i];
+        if (nb->isValid()) {
+            continue;
+        }
+
+        VFixNotebookDialog dialog(nb, notebooks, this);
+        if (dialog.exec()) {
+            qDebug() << "fix path of notebook" << nb->getName() << "to" << dialog.getPathInput();
+            nb->updatePath(dialog.getPathInput());
+        } else {
+            notebooks.removeOne(nb);
+            --i;
+        }
+
+        updated = true;
+    }
+
+    if (updated) {
+        g_config->setNotebooks(notebooks);
+
+        m_notebookSelector->update();
+    }
+
+    m_notebookSelector->restoreCurrentNotebook();
+}
+
+void VMainWindow::setMenuBarVisible(bool p_visible)
+{
+    // Hiding the menubar will disable the shortcut of QActions.
+    if (p_visible) {
+        menuBar()->setFixedSize(QSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX));
+    } else {
+        menuBar()->setFixedHeight(0);
+    }
+}
+
+void VMainWindow::setToolBarVisible(bool p_visible)
+{
+    for (auto bar : m_toolBars) {
+        if (p_visible) {
+            bar->setFixedSize(QSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX));
+        } else {
+            bar->setFixedHeight(0);
+        }
+    }
+}
+
+void VMainWindow::kickOffStartUpTimer(const QStringList &p_files)
+{
+    QTimer::singleShot(300, [this, p_files]() {
+        checkNotebooks();
+        QCoreApplication::sendPostedEvents();
+        promptNewNotebookIfEmpty();
+        QCoreApplication::sendPostedEvents();
+        openStartupPages();
+        openFiles(p_files, false, g_config->getNoteOpenMode(), false, true);
+    });
+}
+
+void VMainWindow::showNotebookPanel()
+{
+    changePanelView(PanelViewState::VerticalMode);
+    m_naviBox->setCurrentIndex(NaviBoxIndex::NotebookPanel, false);
+}
+
+void VMainWindow::showExplorerPanel(bool p_focus)
+{
+    changePanelView(PanelViewState::VerticalMode);
+    m_naviBox->setCurrentIndex(NaviBoxIndex::Explorer, p_focus);
+}
+
+void VMainWindow::stayOnTop(bool p_enabled)
+{
+    bool shown = isVisible();
+    Qt::WindowFlags flags = this->windowFlags();
+
+    Qt::WindowFlags magicFlag = Qt::WindowStaysOnTopHint;
+    if (p_enabled) {
+        setWindowFlags(flags | magicFlag);
+    } else {
+        setWindowFlags(flags ^ magicFlag);
+    }
+
+    if (shown) {
+        show();
+    }
+}
+
+void VMainWindow::focusEditArea() const
+{
+    QWidget *widget = m_editArea->getCurrentTab();
+    if (!widget) {
+        widget = m_editArea;
+    }
+
+    widget->setFocus();
 }
